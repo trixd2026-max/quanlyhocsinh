@@ -134,9 +134,12 @@ export default function App() {
   })
   const [students, setStudents] = useState<Student[]>([])
   const [groups, setGroups] = useState<Group[]>(DEFAULT_GROUPS)
-  const [rules] = useState<ScoreRule[]>(DEFAULT_RULES)
+  const [rules, setRules] = useState<ScoreRule[]>(DEFAULT_RULES)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [demoLoaded, setDemoLoaded] = useState(false)
+  const [loginUser, setLoginUser] = useState('')
+  const [loginPass, setLoginPass] = useState('')
+  const [loginError, setLoginError] = useState('')
 
   useEffect(() => {
     const d = loadData()
@@ -164,6 +167,7 @@ export default function App() {
   const loadDemo = () => {
     setStudents(SAMPLE_STUDENTS)
     setGroups(DEFAULT_GROUPS)
+    setRules(DEFAULT_RULES)
     setClassInfo({
       schoolName: 'Trường THCS Demo', className: '8A1', homeroomTeacher: 'Nguyễn Thị Hoa',
       schoolYear: '2026 – 2027', week1StartDate: '2026-08-17',
@@ -206,24 +210,58 @@ export default function App() {
 
   const weekDays = classInfo.week1StartDate ? getWeekDates(classInfo.week1StartDate, week) : []
 
+  const handleLogin = (e?: { preventDefault?: () => void }) => {
+    e?.preventDefault?.()
+    setLoginError('')
+    const u = loginUser.trim().toLowerCase()
+    const p = loginPass
+    if (u === 'quanlyhocsinh' && p === 'qlhs1234') {
+      setLoggedIn(true)
+      showToast('Đăng nhập thành công (GVCN)')
+      return
+    }
+    if (u === 'demo' && p === 'demo') {
+      loadDemo()
+      return
+    }
+    setLoginError('Sai tài khoản hoặc mật khẩu')
+  }
+
   if (!loggedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(135deg,#ecfdf5,#f0fdfa,#fff)' }}>
         <div className="bg-white rounded-3xl shadow-xl border border-emerald-100 p-8 w-full max-w-md">
-          <div className="text-center mb-8">
+          <div className="text-center mb-6">
             <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-white text-2xl font-bold">QL</div>
             <h1 className="text-2xl font-bold text-emerald-900">QUẢN LÝ LỚP CHỦ NHIỆM</h1>
             <p className="text-sm text-emerald-600 mt-1">Đăng nhập để tiếp tục</p>
           </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
-            <strong>Chưa kết nối Firebase.</strong> Ứng dụng đang chạy chế độ Demo.
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5 text-sm text-amber-800">
+            <strong>Chế độ Demo.</strong> Dữ liệu lưu trên trình duyệt.
           </div>
-          <button onClick={loadDemo} className="w-full bg-emerald-600 text-white py-3 rounded-xl font-medium hover:bg-emerald-700 mb-3">
-            Vào chế độ Demo (GVCN) + dữ liệu mẫu
-          </button>
-          <button onClick={() => { setLoggedIn(true); showToast('Đăng nhập trống') }} className="w-full border-2 border-emerald-600 text-emerald-700 py-3 rounded-xl font-medium hover:bg-emerald-50">
-            Vào không dữ liệu mẫu
-          </button>
+          <form onSubmit={handleLogin} className="space-y-3 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tài khoản</label>
+              <input type="text" autoComplete="username" value={loginUser} onChange={e => setLoginUser(e.target.value)}
+                placeholder="quanlyhocsinh" className="w-full border border-emerald-200 rounded-xl px-3 py-2.5 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Mật khẩu</label>
+              <input type="password" autoComplete="current-password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
+                placeholder="••••••••" className="w-full border border-emerald-200 rounded-xl px-3 py-2.5 text-sm" />
+            </div>
+            {loginError && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{loginError}</p>}
+            <button type="submit" className="w-full bg-emerald-600 text-white py-3 rounded-xl font-medium hover:bg-emerald-700">Đăng nhập</button>
+          </form>
+          <div className="border-t border-gray-100 pt-4 space-y-2">
+            <button type="button" onClick={loadDemo} className="w-full bg-teal-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-teal-700">
+              Vào Demo nhanh + dữ liệu mẫu
+            </button>
+            <button type="button" onClick={() => { setLoggedIn(true); showToast('Đăng nhập trống') }} className="w-full border border-emerald-600 text-emerald-700 py-2.5 rounded-xl text-sm font-medium hover:bg-emerald-50">
+              Vào không dữ liệu mẫu
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 text-center mt-4">GVCN: quanlyhocsinh / qlhs1234</p>
         </div>
         {toast && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-emerald-800 text-white px-5 py-2.5 rounded-full text-sm shadow-lg">{toast}</div>}
       </div>
