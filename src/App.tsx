@@ -46,18 +46,18 @@ const DEFAULT_RULES: ScoreRule[] = [
 ]
 
 const SAMPLE_STUDENTS: Student[] = [
-  { id: 's1', stt: 1, fullName: 'Nguyễn Văn An', birthDate: '2012-03-15', gender: 'Nam', groupId: 'g1', position: 'Lớp trưởng', parentPhone: '0901234567', notes: '', active: true },
-  { id: 's2', stt: 2, fullName: 'Trần Thị Bình', birthDate: '2012-05-20', gender: 'Nữ', groupId: 'g1', position: 'Lớp phó học tập', parentPhone: '0902345678', notes: '', active: true },
-  { id: 's3', stt: 3, fullName: 'Lê Văn Cường', birthDate: '2012-01-10', gender: 'Nam', groupId: 'g1', position: '', parentPhone: '0903456789', notes: '', active: true },
-  { id: 's4', stt: 4, fullName: 'Phạm Thị Dung', birthDate: '2012-07-22', gender: 'Nữ', groupId: 'g2', position: 'Lớp phó kỷ luật', parentPhone: '0904567890', notes: '', active: true },
-  { id: 's5', stt: 5, fullName: 'Hoàng Văn Em', birthDate: '2012-09-05', gender: 'Nam', groupId: 'g2', position: '', parentPhone: '0905678901', notes: '', active: true },
-  { id: 's6', stt: 6, fullName: 'Vũ Thị Phương', birthDate: '2012-11-18', gender: 'Nữ', groupId: 'g2', position: '', parentPhone: '0906789012', notes: '', active: true },
-  { id: 's7', stt: 7, fullName: 'Đặng Văn Giang', birthDate: '2012-02-28', gender: 'Nam', groupId: 'g3', position: 'Bí thư', parentPhone: '0907890123', notes: '', active: true },
-  { id: 's8', stt: 8, fullName: 'Bùi Thị Hoa', birthDate: '2012-04-12', gender: 'Nữ', groupId: 'g3', position: '', parentPhone: '0908901234', notes: '', active: true },
-  { id: 's9', stt: 9, fullName: 'Ngô Văn Ích', birthDate: '2012-06-30', gender: 'Nam', groupId: 'g3', position: '', parentPhone: '0909012345', notes: '', active: true },
-  { id: 's10', stt: 10, fullName: 'Dương Thị Kim', birthDate: '2012-08-08', gender: 'Nữ', groupId: 'g4', position: 'Tổ trưởng', parentPhone: '0910123456', notes: '', active: true },
-  { id: 's11', stt: 11, fullName: 'Lý Văn Long', birthDate: '2012-10-25', gender: 'Nam', groupId: 'g4', position: '', parentPhone: '0911234567', notes: '', active: true },
-  { id: 's12', stt: 12, fullName: 'Mai Thị Nga', birthDate: '2012-12-03', gender: 'Nữ', groupId: 'g4', position: '', parentPhone: '0912345678', notes: '', active: true },
+  { id: 's1', stt: 1, fullName: 'Nguyễn Văn An', birthDate: '2017-03-15', gender: 'Nam', groupId: 'g1', position: 'Lớp trưởng', parentPhone: '0901234567', notes: '', active: true },
+  { id: 's2', stt: 2, fullName: 'Trần Thị Bình', birthDate: '2017-05-20', gender: 'Nữ', groupId: 'g1', position: 'Lớp phó học tập', parentPhone: '0902345678', notes: '', active: true },
+  { id: 's3', stt: 3, fullName: 'Lê Văn Cường', birthDate: '2017-01-10', gender: 'Nam', groupId: 'g1', position: '', parentPhone: '0903456789', notes: '', active: true },
+  { id: 's4', stt: 4, fullName: 'Phạm Thị Dung', birthDate: '2017-07-22', gender: 'Nữ', groupId: 'g2', position: 'Lớp phó kỷ luật', parentPhone: '0904567890', notes: '', active: true },
+  { id: 's5', stt: 5, fullName: 'Hoàng Văn Em', birthDate: '2017-09-05', gender: 'Nam', groupId: 'g2', position: '', parentPhone: '0905678901', notes: '', active: true },
+  { id: 's6', stt: 6, fullName: 'Vũ Thị Phương', birthDate: '2017-11-18', gender: 'Nữ', groupId: 'g2', position: '', parentPhone: '0906789012', notes: '', active: true },
+  { id: 's7', stt: 7, fullName: 'Đặng Văn Giang', birthDate: '2017-02-28', gender: 'Nam', groupId: 'g3', position: 'Bí thư', parentPhone: '0907890123', notes: '', active: true },
+  { id: 's8', stt: 8, fullName: 'Bùi Thị Hoa', birthDate: '2017-04-12', gender: 'Nữ', groupId: 'g3', position: '', parentPhone: '0908901234', notes: '', active: true },
+  { id: 's9', stt: 9, fullName: 'Ngô Văn Ích', birthDate: '2017-06-30', gender: 'Nam', groupId: 'g3', position: '', parentPhone: '0909012345', notes: '', active: true },
+  { id: 's10', stt: 10, fullName: 'Dương Thị Kim', birthDate: '2017-08-08', gender: 'Nữ', groupId: 'g4', position: 'Tổ trưởng', parentPhone: '0910123456', notes: '', active: true },
+  { id: 's11', stt: 11, fullName: 'Lý Văn Long', birthDate: '2017-10-25', gender: 'Nam', groupId: 'g4', position: '', parentPhone: '0911234567', notes: '', active: true },
+  { id: 's12', stt: 12, fullName: 'Mai Thị Nga', birthDate: '2017-12-03', gender: 'Nữ', groupId: 'g4', position: '', parentPhone: '0912345678', notes: '', active: true },
 ]
 
 const DEFAULT_GROUPS: Group[] = [
@@ -132,9 +132,9 @@ export default function App() {
   const [toast, setToast] = useState('')
   const [modal, setModal] = useState<{ type: string; studentId?: string } | null>(null)
   const [classInfo, setClassInfo] = useState<ClassInfo>({
-    schoolName: '', className: '', homeroomTeacher: '',
+    schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ',
     schoolYear: '2026 – 2027', week1StartDate: '2026-08-17',
-    totalWeeks: 38, periodsPerDay: 5, slogan: '',
+    totalWeeks: 35, periodsPerDay: 7, slogan: 'Chăm ngoan - Học giỏi',
   })
   const [students, setStudents] = useState<Student[]>([])
   const [groups, setGroups] = useState<Group[]>(DEFAULT_GROUPS)
@@ -188,9 +188,9 @@ export default function App() {
     setGroups(DEFAULT_GROUPS)
     setRules(DEFAULT_RULES)
     setClassInfo({
-      schoolName: 'Trường THCS Demo', className: '8A1', homeroomTeacher: 'Nguyễn Thị Hoa',
+      schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ',
       schoolYear: '2026 – 2027', week1StartDate: '2026-08-17',
-      totalWeeks: 38, periodsPerDay: 5, slogan: 'Đoàn kết – Kỷ luật – Học tập tốt',
+      totalWeeks: 35, periodsPerDay: 7, slogan: 'Chăm ngoan - Học giỏi',
     })
     setDemoLoaded(true)
     setLoggedIn(true)
@@ -198,9 +198,9 @@ export default function App() {
       SAMPLE_STUDENTS.forEach(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>).catch(console.error))
       DEFAULT_GROUPS.forEach(g => upsertDoc('groups', g.id, g as unknown as Record<string, unknown>).catch(console.error))
       saveClassInfo({
-        schoolName: 'Trường THCS Demo', className: '8A1', homeroomTeacher: 'Nguyễn Thị Hoa',
-        schoolYear: '2026 – 2027', week1StartDate: '2026-08-17', totalWeeks: 38, periodsPerDay: 5,
-        slogan: 'Đoàn kết – Kỷ luật – Học tập tốt',
+        schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ',
+        schoolYear: '2026 – 2027', week1StartDate: '2026-08-17', totalWeeks: 35, periodsPerDay: 7,
+        slogan: 'Chăm ngoan - Học giỏi',
       }).catch(console.error)
       showToast('Đã tải dữ liệu mẫu + đồng bộ Firebase')
     } else {
@@ -223,7 +223,7 @@ export default function App() {
     if (!rule) return
     const tx: Transaction = {
       id: uid(), studentId, weekNumber: week, date, ruleId,
-      points: rule.points, note: '', createdBy: 'GVCN Demo', createdAt: new Date().toISOString(),
+      points: rule.points, note: '', createdBy: 'GVCN', createdAt: new Date().toISOString(),
     }
     setTransactions(prev => [...prev, tx])
     if (isFirebaseConfigured) {
@@ -330,7 +330,7 @@ export default function App() {
               Vào không dữ liệu mẫu
             </button>
           </div>
-          <p className="text-xs text-gray-400 text-center mt-4">GVCN: quanlyhocsinh / qlhs1234</p>
+          <p className="text-xs text-gray-400 text-center mt-4">GVCN: quanlyhocsinh / qlhs1234 · Lớp 3A3 – TH Phước Sơn</p>
         </div>
         {toast && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-emerald-800 text-white px-5 py-2.5 rounded-full text-sm shadow-lg">{toast}</div>}
       </div>
@@ -471,7 +471,7 @@ export default function App() {
                   </thead>
                   <tbody>
                     {filteredStudents.length === 0 ? (
-                      <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-400">Chưa có học sinh</td></tr>
+                      <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-400">Chưa có học sinh — vào Demo hoặc Thêm học sinh</td></tr>
                     ) : filteredStudents.map(s => {
                       const sc = weekScore(s.id, week)
                       const gName = groups.find(g => g.id === s.groupId)?.name || '—'
@@ -613,9 +613,9 @@ export default function App() {
                   <button onClick={() => {
                     const name = prompt('Họ và tên học sinh mới:')
                     if (!name) return
-                    const stt = students.length ? Math.max(...students.map(s => s.stt)) + 1 : 1
+                    const stt = students.length ? Math.max(...students.map(s => s.stt), 0) + 1 : 1
                     const ns: Student = {
-                      id: uid(), stt, fullName: name, birthDate: '2012-01-01', gender: 'Nam',
+                      id: uid(), stt, fullName: name, birthDate: '2017-01-01', gender: 'Nam',
                       groupId: groups[0]?.id || 'g1', position: '', parentPhone: '', notes: '', active: true,
                     }
                     setStudents(prev => [...prev, ns])
@@ -689,7 +689,7 @@ export default function App() {
                     <WifiOff className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-semibold text-amber-800">Chưa kết nối cơ sở dữ liệu (Firebase)</p>
-                      <p className="text-sm text-amber-700 mt-1">Dữ liệu đang lưu trên trình duyệt.</p>
+                      <p className="text-sm text-amber-700 mt-1">Dữ liệu đang lưu trên trình duyệt. Kiểm tra biến môi trường Vercel.</p>
                     </div>
                   </>
                 )}
