@@ -25,6 +25,15 @@ export const isFirebaseConfigured = Boolean(
   String(cfg.apiKey).length > 10
 )
 
+// Debug build-time env (không in secret)
+if (typeof window !== 'undefined') {
+  console.info('[QLCN Firebase]', {
+    configured: isFirebaseConfigured,
+    hasApiKey: Boolean(cfg.apiKey && cfg.apiKey.length > 5),
+    projectId: cfg.projectId || '(empty)',
+  })
+}
+
 let app: FirebaseApp | null = null
 let auth: Auth | null = null
 let db: Firestore | null = null
