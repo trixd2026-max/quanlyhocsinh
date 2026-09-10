@@ -9,13 +9,24 @@ import {
   type Firestore, type Unsubscribe,
 } from 'firebase/firestore'
 
+/** Config Firebase Web – project quanlyhocsinh-48840 */
+const HARDCODED = {
+  apiKey: 'AIzaSyBexBGMuOkms37gNikIaxe-UyzMo2iTgQU',
+  authDomain: 'quanlyhocsinh-48840.firebaseapp.com',
+  projectId: 'quanlyhocsinh-48840',
+  storageBucket: 'quanlyhocsinh-48840.firebasestorage.app',
+  messagingSenderId: '407261790730',
+  appId: '1:407261790730:web:31728a762f0b8bab0f55f3',
+}
+
+// Ưu tiên env Vercel nếu có; không thì dùng HARDCODED
 const cfg = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
+  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string | undefined) || HARDCODED.apiKey,
+  authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined) || HARDCODED.authDomain,
+  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined) || HARDCODED.projectId,
+  storageBucket: (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined) || HARDCODED.storageBucket,
+  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined) || HARDCODED.messagingSenderId,
+  appId: (import.meta.env.VITE_FIREBASE_APP_ID as string | undefined) || HARDCODED.appId,
 }
 
 export const isFirebaseConfigured = Boolean(
@@ -25,11 +36,9 @@ export const isFirebaseConfigured = Boolean(
   String(cfg.apiKey).length > 10
 )
 
-// Debug build-time env (không in secret)
 if (typeof window !== 'undefined') {
   console.info('[QLCN Firebase]', {
     configured: isFirebaseConfigured,
-    hasApiKey: Boolean(cfg.apiKey && cfg.apiKey.length > 5),
     projectId: cfg.projectId || '(empty)',
   })
 }
@@ -39,7 +48,7 @@ let auth: Auth | null = null
 let db: Firestore | null = null
 
 if (isFirebaseConfigured) {
-  app = initializeApp(cfg as Record<string, string>)
+  app = initializeApp(cfg)
   auth = getAuth(app)
   db = getFirestore(app)
 }
