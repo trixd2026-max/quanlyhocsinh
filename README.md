@@ -2,15 +2,26 @@
 
 Ứng dụng quản lý lớp chủ nhiệm – React + TypeScript + Vite.
 
-## Tính năng (Demo)
+**Live:** https://quanlyhocsinhtieuhocps.vercel.app
+
+## Đăng nhập Demo
+
+| Vai trò | Tài khoản | Mật khẩu |
+|---------|-----------|----------|
+| GVCN | `quanlyhocsinh` | `qlhs1234` |
+| Demo nhanh | `demo` | `demo` |
+
+Hoặc bấm **Vào Demo nhanh + dữ liệu mẫu** trên màn hình đăng nhập.
+
+## Tính năng
 
 - 8 phân hệ: Tổng quan, Nhập điểm tuần, Thi đua tổ, Vi phạm, Học tập, Báo bài/TKB, Rèn luyện cá nhân, Cài đặt lớp
 - Ghi nhận điểm theo quy định (cộng/trừ)
-- Xếp hạng tổ realtime
+- Xếp hạng tổ theo tuần
+- Xuất CSV danh sách học sinh & lịch sử điểm
 - Dữ liệu mẫu 12 học sinh, 4 tổ, 12 quy định điểm
 - Lưu localStorage (chế độ Demo)
 - Responsive (điện thoại → desktop)
-- Giao diện tiếng Việt, tông xanh lá – xanh ngọc
 
 ## Chạy local
 
@@ -21,11 +32,15 @@ npm run dev
 
 ## Deploy Vercel
 
-Kết nối repo GitHub → Framework: Vite → Build: `npm run build` → Output: `dist`
+Repo đã kết nối. Mỗi push lên `main` sẽ tự build lại.
+
+- Framework: Vite
+- Build: `npm run build`
+- Output: `dist`
 
 ## Firebase (bước tiếp theo)
 
-Tạo file `.env` với các biến VITE_FIREBASE_*. Xem `firestore.rules`.
+Tạo file `.env` với các biến `VITE_FIREBASE_*`. Xem `firestore.rules` và `.env.example`.
 
 ## Kiến trúc đã chốt
 
