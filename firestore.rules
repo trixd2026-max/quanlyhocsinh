@@ -2,27 +2,51 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isSignedIn() { return request.auth != null; }
-    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function isTeacher() { return isSignedIn() && userDoc().role == 'teacher'; }
-    function isOfficer() {
-      return isSignedIn() && userDoc().role in [
-        'classPresident','viceStudy','viceDiscipline','secretary','treasurer','groupLeader'
-      ];
+
+    match /classes/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
-    match /classes/{id} { allow read: if isSignedIn(); allow write: if isTeacher(); }
-    match /users/{uid} { allow read: if isSignedIn(); allow write: if isTeacher() || request.auth.uid == uid; }
-    match /students/{id} { allow read: if isSignedIn(); allow write: if isTeacher(); }
-    match /groups/{id} { allow read: if isSignedIn(); allow write: if isTeacher(); }
-    match /scoreRules/{id} { allow read: if isSignedIn(); allow write: if isTeacher(); }
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == uid);
+    }
+    match /students/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    match /groups/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    match /scoreRules/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
     match /scoreTransactions/{id} {
       allow read: if isSignedIn();
-      allow create: if isTeacher() || isOfficer();
-      allow update, delete: if isTeacher();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn();
     }
-    match /weeklyLocks/{id} { allow read: if isSignedIn(); allow write: if isTeacher(); }
-    match /groupBonuses/{id} { allow read: if isSignedIn(); allow write: if isTeacher(); }
-    match /timetables/{id} { allow read: if isSignedIn(); allow write: if isTeacher(); }
-    match /assignments/{id} { allow read: if isSignedIn(); allow write: if isTeacher() || isOfficer(); }
-    match /auditLogs/{id} { allow read: if isTeacher(); allow create: if isSignedIn(); }
+    match /weeklyLocks/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    match /groupBonuses/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    match /timetables/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    match /assignments/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    match /auditLogs/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
   }
 }

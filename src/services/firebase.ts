@@ -5,11 +5,10 @@ import {
 } from 'firebase/auth'
 import {
   getFirestore, doc, getDoc, setDoc, collection, onSnapshot,
-  query, addDoc, deleteDoc, serverTimestamp,
+  query, addDoc, deleteDoc, serverTimestamp, runTransaction,
   type Firestore, type Unsubscribe,
 } from 'firebase/firestore'
 
-/** Config Firebase Web – project quanlyhocsinh-48840 */
 const HARDCODED = {
   apiKey: 'AIzaSyBexBGMuOkms37gNikIaxe-UyzMo2iTgQU',
   authDomain: 'quanlyhocsinh-48840.firebaseapp.com',
@@ -19,7 +18,6 @@ const HARDCODED = {
   appId: '1:407261790730:web:31728a762f0b8bab0f55f3',
 }
 
-// Ưu tiên env Vercel nếu có; không thì dùng HARDCODED
 const cfg = {
   apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string | undefined) || HARDCODED.apiKey,
   authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined) || HARDCODED.authDomain,
@@ -30,17 +28,11 @@ const cfg = {
 }
 
 export const isFirebaseConfigured = Boolean(
-  cfg.apiKey &&
-  cfg.projectId &&
-  cfg.apiKey !== 'YOUR_API_KEY' &&
-  String(cfg.apiKey).length > 10
+  cfg.apiKey && cfg.projectId && cfg.apiKey !== 'YOUR_API_KEY' && String(cfg.apiKey).length > 10
 )
 
 if (typeof window !== 'undefined') {
-  console.info('[QLCN Firebase]', {
-    configured: isFirebaseConfigured,
-    projectId: cfg.projectId || '(empty)',
-  })
+  console.info('[QLCN Firebase]', { configured: isFirebaseConfigured, projectId: cfg.projectId })
 }
 
 let app: FirebaseApp | null = null
@@ -54,31 +46,24 @@ if (isFirebaseConfigured) {
 }
 
 export { app, auth, db }
-
 export const CLASS_ID = 'main'
 
 export async function firebaseLogin(email: string, password: string): Promise<User> {
   if (!auth) throw new Error('Firebase chưa cấu hình')
-  const cred = await signInWithEmailAndPassword(auth, email, password)
-  return cred.user
+  return (await signInWithEmailAndPassword(auth, email, password)).user
 }
 
 export async function firebaseRegister(email: string, password: string): Promise<User> {
   if (!auth) throw new Error('Firebase chưa cấu hình')
-  const cred = await createUserWithEmailAndPassword(auth, email, password)
-  return cred.user
+  return (await createUserWithEmailAndPassword(auth, email, password)).user
 }
 
 export async function firebaseLogout(): Promise<void> {
-  if (!auth) return
-  await signOut(auth)
+  if (auth) await signOut(auth)
 }
 
 export function watchAuth(cb: (user: User | null) => void): Unsubscribe {
-  if (!auth) {
-    cb(null)
-    return () => {}
-  }
+  if (!auth) { cb(null); return () => {} }
   return onAuthStateChanged(auth, cb)
 }
 
@@ -97,17 +82,10 @@ export function watchCollection<T>(
   name: string,
   cb: (items: (T & { id: string })[]) => void,
 ): Unsubscribe {
-  if (!db) {
-    cb([])
-    return () => {}
-  }
-  const q = query(collection(db, name))
-  return onSnapshot(q, (snap) => {
-    const items = snap.docs.map((d) => ({ id: d.id, ...(d.data() as T) }))
-    cb(items)
-  }, (err) => {
-    console.error('Firestore watch error', name, err)
-  })
+  if (!db) { cb([]); return () => {} }
+  return onSnapshot(query(collection(db, name)), (snap) => {
+    cb(snap.docs.map((d) => ({ id: d.id, ...(d.data() as T) })))
+  }, (err) => console.error('Firestore watch error', name, err))
 }
 
 export async function upsertDoc(col: string, id: string, data: Record<string, unknown>): Promise<void> {
@@ -124,6 +102,41 @@ export async function addDocAuto(col: string, data: Record<string, unknown>): Pr
 export async function removeDoc(col: string, id: string): Promise<void> {
   if (!db) return
   await deleteDoc(doc(db, col, id))
+}
+
+/** Repository: ghi điểm atomic – kiểm tra khóa tuần rồi tạo scoreTransactions */
+export async function createScoreTransactionAtomic(tx: {
+  id: string
+  studentId: string
+  weekNumber: number
+  date: string
+  ruleId: string
+  points: number
+  note: string
+  createdBy: string
+}): Promise<void> {
+  if (!db) return
+  const txRef = doc(db, 'scoreTransactions', tx.id)
+  const lockRef = doc(db, 'weeklyLocks', `week_${tx.weekNumber}`)
+  await runTransaction(db, async (transaction) => {
+    const lockSnap = await transaction.get(lockRef)
+    if (lockSnap.exists() && lockSnap.data()?.locked === true) {
+      throw new Error(`Tuần ${tx.weekNumber} đã khóa – không thể ghi nhận`)
+    }
+    transaction.set(txRef, {
+      ...tx,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  })
+}
+
+/** Repository: khóa / mở khóa tuần (GVCN) */
+export async function setWeekLocked(weekNumber: number, locked: boolean, by: string): Promise<void> {
+  if (!db) return
+  await setDoc(doc(db, 'weeklyLocks', `week_${weekNumber}`), {
+    weekNumber, locked, by, updatedAt: serverTimestamp(),
+  }, { merge: true })
 }
 
 export async function ensureUserProfile(uid: string, profile: Record<string, unknown>): Promise<void> {
