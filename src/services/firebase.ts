@@ -104,7 +104,6 @@ export async function removeDoc(col: string, id: string): Promise<void> {
   await deleteDoc(doc(db, col, id))
 }
 
-/** Repository: ghi điểm atomic – kiểm tra khóa tuần rồi tạo scoreTransactions */
 export async function createScoreTransactionAtomic(tx: {
   id: string
   studentId: string
@@ -131,12 +130,26 @@ export async function createScoreTransactionAtomic(tx: {
   })
 }
 
-/** Repository: khóa / mở khóa tuần (GVCN) */
 export async function setWeekLocked(weekNumber: number, locked: boolean, by: string): Promise<void> {
   if (!db) return
   await setDoc(doc(db, 'weeklyLocks', `week_${weekNumber}`), {
     weekNumber, locked, by, updatedAt: serverTimestamp(),
   }, { merge: true })
+}
+
+/** Ghi nhật ký thao tác */
+export async function writeAuditLog(entry: {
+  action: string
+  detail: string
+  by: string
+  role?: string
+}): Promise<void> {
+  if (!db) return
+  await addDoc(collection(db, 'auditLogs'), {
+    ...entry,
+    at: serverTimestamp(),
+    clientAt: new Date().toISOString(),
+  })
 }
 
 export async function ensureUserProfile(uid: string, profile: Record<string, unknown>): Promise<void> {
