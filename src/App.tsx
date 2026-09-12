@@ -36,7 +36,6 @@ function classifyScore(total: number, thresholds = { good: 80, fair: 50 }) {
   if (total >= thresholds.fair) return { label: 'Khá', color: 'text-blue-600', bg: 'bg-blue-50' }
   return { label: 'TB', color: 'text-amber-600', bg: 'bg-amber-50' }
 }
-/** Mật khẩu PH từng nhà: view + 4 số cuối SĐT */
 function parentPasswordFromPhone(phone: string): string {
   const tail = (phone || '').replace(/\D/g, '').slice(-4)
   return tail.length === 4 ? `view${tail}` : ''
@@ -146,12 +145,6 @@ function downloadCSV(filename: string, rows: string[][]) {
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
   URL.revokeObjectURL(url)
 }
-function downloadJSON(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
 function parseCSV(text: string): string[][] {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim())
   return lines.map(line => {
@@ -234,7 +227,19 @@ export default function App() {
 
   useEffect(() => {
     if (!loggedIn || !isFirebaseConfigured) return
-    const u1 = watchCollection<Student>('students', (items) => { if (items.length) setStudents(items.map(s => ({ ...s, active: s.active !== false }))) })
+    const u1 = watchCollection<Student>('students', (items) => {
+      if (!items.length) return
+      const mapped = items.map(s => ({ ...s, active: s.active !== false }))
+      const byKey = new Map<string, Student>()
+      for (const s of mapped) {
+        const key = `${(s.fullName || '').trim().toLowerCase()}|${(s.parentPhone || '').replace(/\D/g, '')}`
+        const prev = byKey.get(key)
+        if (!prev) byKey.set(key, s)
+        else if (s.active && !prev.active) byKey.set(key, s)
+      }
+      const list = Array.from(byKey.values()).filter(s => s.active).sort((a, b) => (a.stt || 0) - (b.stt || 0))
+      setStudents(list.map((s, i) => ({ ...s, stt: i + 1 })))
+    })
     const u2 = watchCollection<Transaction>('scoreTransactions', (items) => { if (items.length) setTransactions(items) })
     const u3 = watchCollection<Group>('groups', (items) => { if (items.length) setGroups(items.sort((a, b) => a.order - b.order)) })
     const u4 = watchCollection<{ weekNumber: number; locked: boolean }>('weeklyLocks', (items) => {
@@ -250,7 +255,7 @@ export default function App() {
   const logAction = (action: string, detail: string) => {
     const entry = { id: uid(), action, detail, by: ROLE_LABELS[role], clientAt: new Date().toISOString() }
     setAuditLogs(prev => [entry, ...prev].slice(0, 100))
-    if (isFirebaseConfigured) writeAuditLog({ action, detail, by: ROLE_LABELS[role], role }).catch(console.error)
+    if (isFirebaseConfigured) writeAuditLog({ action, detail, by: ROLE_LABELS[role], role }).catch(console.warn)
   }
 
   const loadDemo = () => {
@@ -258,11 +263,11 @@ export default function App() {
     setClassInfo({ schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ', schoolYear: '2026 – 2027', week1StartDate: '2026-08-17', totalWeeks: 35, periodsPerDay: 7, slogan: 'Chăm ngoan - Học giỏi' })
     setDemoLoaded(true); setLoggedIn(true); setRole('teacher'); setLinkedStudentId(null)
     if (isFirebaseConfigured) {
-      SAMPLE_STUDENTS.forEach(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>).catch(console.error))
-      DEFAULT_GROUPS.forEach(g => upsertDoc('groups', g.id, g as unknown as Record<string, unknown>).catch(console.error))
-      saveClassInfo({ schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ', schoolYear: '2026 – 2027', week1StartDate: '2026-08-17', totalWeeks: 35, periodsPerDay: 7, slogan: 'Chăm ngoan - Học giỏi' }).catch(console.error)
-      showToast('Đã tải dữ liệu mẫu + đồng bộ Firebase')
-    } else showToast('Đã tải dữ liệu minh họa')
+      SAMPLE_STUDENTS.forEach(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>).catch(console.warn))
+      DEFAULT_GROUPS.forEach(g => upsertDoc('groups', g.id, g as unknown as Record<string, unknown>).catch(console.warn))
+      saveClassInfo({ schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ', schoolYear: '2026 – 2027', week1StartDate: '2026-08-17', totalWeeks: 35, periodsPerDay: 7, slogan: 'Chăm ngoan - Học giỏi' }).catch(console.warn)
+    }
+    showToast('Đã tải dữ liệu mẫu')
   }
 
   const weekScore = (studentId: string, w: number) =>
@@ -275,86 +280,80 @@ export default function App() {
   const addTransaction = async (studentId: string, ruleId: string, date: string) => {
     const rule = rules.find(r => r.id === ruleId)
     if (!rule) return
-    if (!canCreateScore(role, rule.group)) { showToast('Bạn không có quyền ghi nhận loại sự kiện này'); return }
+    if (!canCreateScore(role, rule.group)) { showToast('Không có quyền ghi nhận'); return }
     if (lockedWeeks[week]) { showToast(`Tuần ${week} đã khóa`); return }
     const student = students.find(s => s.id === studentId)
     const tx: Transaction = { id: uid(), studentId, weekNumber: week, date, ruleId, points: rule.points, note: '', createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
-    try {
-      if (isFirebaseConfigured) await createScoreTransactionAtomic(tx)
-      setTransactions(prev => [...prev, tx])
-      logAction('ghi_diem', `${student?.fullName || studentId}: ${rule.name}`)
-      showToast(`Đã ghi nhận: ${rule.name}`)
-      setModal(null)
-    } catch (e: unknown) { showToast(e instanceof Error ? e.message : 'Lỗi ghi nhận điểm') }
+    setTransactions(prev => [...prev, tx])
+    setModal(null)
+    showToast(`Đã ghi nhận: ${rule.name} (${rule.points > 0 ? '+' : ''}${rule.points})`)
+    logAction('ghi_diem', `${student?.fullName}: ${rule.name}`)
+    if (isFirebaseConfigured) {
+      try { await createScoreTransactionAtomic(tx) }
+      catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : ''
+        if (msg.includes('đã khóa')) {
+          setTransactions(prev => prev.filter(t => t.id !== tx.id))
+          showToast(msg)
+        } else console.warn(msg)
+      }
+    }
   }
 
   const toggleWeekLock = async () => {
-    if (!canLockWeek(role)) { showToast('Chỉ GVCN được khóa/mở tuần'); return }
+    if (!canLockWeek(role)) { showToast('Chỉ GVCN'); return }
     const isLocked = !!lockedWeeks[week]
     if (isLocked) {
-      const pwd = prompt('Nhập mật khẩu GVCN để MỞ KHÓA tuần (hoặc gõ MOKHOA):')
+      const pwd = prompt('MK mở khóa (qlhs1234 hoặc MOKHOA):')
       if (pwd === null) return
-      if (pwd !== 'qlhs1234' && pwd.trim().toUpperCase() !== 'MOKHOA') {
-        showToast('Sai mật khẩu – không mở khóa')
-        return
-      }
-    } else {
-      if (!confirm(`Khóa tuần ${week}?`)) return
-    }
+      if (pwd !== 'qlhs1234' && pwd.trim().toUpperCase() !== 'MOKHOA') { showToast('Sai MK'); return }
+    } else if (!confirm(`Khóa tuần ${week}?`)) return
     const next = !isLocked
     setLockedWeeks(prev => ({ ...prev, [week]: next }))
-    if (isFirebaseConfigured) { try { await setWeekLocked(week, next, ROLE_LABELS[role]) } catch { showToast('Lỗi khóa tuần') } }
-    logAction(next ? 'khoa_tuan' : 'mo_khoa_tuan', `Tuần ${week}`)
+    if (isFirebaseConfigured) setWeekLocked(week, next, ROLE_LABELS[role]).catch(console.warn)
     showToast(next ? `Đã khóa tuần ${week}` : `Đã mở khóa tuần ${week}`)
   }
 
   const markAttendance = async (status: 'present' | 'late' | 'excused' | 'absent') => {
-    if (!canAttendance(role)) { showToast('Không có quyền điểm danh'); return }
-    if (lockedWeeks[week]) { showToast(`Tuần ${week} đã khóa`); return }
+    if (!canAttendance(role)) { showToast('Không có quyền'); return }
+    if (lockedWeeks[week]) { showToast('Tuần đã khóa'); return }
     const ruleMap: Record<string, string> = { present: 'r1', late: 'r8', excused: 'r6', absent: 'r7' }
-    const ruleId = ruleMap[status]
-    const rule = rules.find(r => r.id === ruleId)
+    const rule = rules.find(r => r.id === ruleMap[status])
     if (!rule) return
-    let count = 0
+    const batch: Transaction[] = []
     for (const s of students.filter(x => x.active)) {
       if (transactions.some(t => t.studentId === s.id && t.date === attendDate && ['r1','r6','r7','r8'].includes(t.ruleId))) continue
-      const tx: Transaction = { id: uid(), studentId: s.id, weekNumber: week, date: attendDate, ruleId, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
-      try { if (isFirebaseConfigured) await createScoreTransactionAtomic(tx); setTransactions(prev => [...prev, tx]); count++ } catch (e) { console.error(e) }
+      batch.push({ id: uid(), studentId: s.id, weekNumber: week, date: attendDate, ruleId: rule.id, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() })
     }
-    logAction('diem_danh', `${status}: ${count} HS`)
-    showToast(`Điểm danh ${status}: ${count} HS`)
+    if (batch.length) setTransactions(prev => [...prev, ...batch])
+    showToast(`Điểm danh: ${batch.length} HS`)
+    if (isFirebaseConfigured) for (const tx of batch) createScoreTransactionAtomic(tx).catch(console.warn)
   }
 
   const markOneAttendance = async (studentId: string, status: 'present' | 'late' | 'excused' | 'absent') => {
-    if (!canAttendance(role) || lockedWeeks[week]) return
+    if (!canAttendance(role)) { showToast('Không có quyền'); return }
+    if (lockedWeeks[week]) { showToast('Tuần đã khóa'); return }
     const ruleMap: Record<string, string> = { present: 'r1', late: 'r8', excused: 'r6', absent: 'r7' }
-    const ruleId = ruleMap[status]
-    const rule = rules.find(r => r.id === ruleId)
+    const rule = rules.find(r => r.id === ruleMap[status])
     if (!rule) return
-    for (const o of transactions.filter(t => t.studentId === studentId && t.date === attendDate && ['r1','r6','r7','r8'].includes(t.ruleId))) {
-      setTransactions(prev => prev.filter(t => t.id !== o.id))
-      if (isFirebaseConfigured) removeDoc('scoreTransactions', o.id).catch(console.error)
-    }
+    const oldIds = transactions.filter(t => t.studentId === studentId && t.date === attendDate && ['r1','r6','r7','r8'].includes(t.ruleId)).map(t => t.id)
     const student = students.find(s => s.id === studentId)
-    const tx: Transaction = { id: uid(), studentId, weekNumber: week, date: attendDate, ruleId, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
-    try {
-      if (isFirebaseConfigured) await createScoreTransactionAtomic(tx)
-      setTransactions(prev => [...prev, tx])
-      logAction('diem_danh_tung_em', `${student?.fullName}: ${rule.name}`)
-      showToast(`${student?.fullName}: ${rule.name}`)
-    } catch (e: unknown) { showToast(e instanceof Error ? e.message : 'Lỗi') }
+    const tx: Transaction = { id: uid(), studentId, weekNumber: week, date: attendDate, ruleId: rule.id, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
+    setTransactions(prev => [...prev.filter(t => !oldIds.includes(t.id)), tx])
+    showToast(`${student?.fullName}: ${rule.name}`)
+    if (isFirebaseConfigured) {
+      oldIds.forEach(id => removeDoc('scoreTransactions', id).catch(console.warn))
+      createScoreTransactionAtomic(tx).catch(console.warn)
+    }
   }
 
   const deleteTransaction = async (txId: string) => {
     if (!canDeleteTx(role)) return
     const tx = transactions.find(t => t.id === txId)
     if (!tx || lockedWeeks[tx.weekNumber]) { showToast('Không xóa được'); return }
-    if (!confirm('Xóa giao dịch này?')) return
-    const student = students.find(s => s.id === tx.studentId)
-    const rule = rules.find(r => r.id === tx.ruleId)
+    if (!confirm('Xóa giao dịch?')) return
     setTransactions(prev => prev.filter(t => t.id !== txId))
-    if (isFirebaseConfigured) removeDoc('scoreTransactions', txId).catch(console.error)
-    logAction('xoa_giao_dich', `${student?.fullName}: ${rule?.name}`)
+    if (isFirebaseConfigured) removeDoc('scoreTransactions', txId).catch(console.warn)
     showToast('Đã xóa')
   }
 
@@ -364,29 +363,23 @@ export default function App() {
     if (!tx || lockedWeeks[tx.weekNumber]) { showToast('Không sửa được'); return }
     const rule = rules.find(r => r.id === newRuleId)
     if (!rule) return
-    const student = students.find(s => s.id === tx.studentId)
     const updated = { ...tx, ruleId: newRuleId, points: rule.points, note: note || tx.note }
     setTransactions(prev => prev.map(t => t.id === txId ? updated : t))
-    if (isFirebaseConfigured) upsertDoc('scoreTransactions', txId, { ruleId: newRuleId, points: rule.points, note: updated.note }).catch(console.error)
-    logAction('sua_giao_dich', `${student?.fullName}: ${rule.name}`)
-    showToast('Đã sửa giao dịch')
+    if (isFirebaseConfigured) upsertDoc('scoreTransactions', txId, { ruleId: newRuleId, points: rule.points, note: updated.note }).catch(console.warn)
+    showToast('Đã sửa')
     setModal(null)
   }
 
   const updateStudent = async (studentId: string, patch: Partial<Student>) => {
     if (!canEditStudents(role)) return
     setStudents(prev => prev.map(s => s.id === studentId ? { ...s, ...patch } : s))
-    if (isFirebaseConfigured) upsertDoc('students', studentId, { ...patch }).catch(console.error)
-    logAction('sua_hoc_sinh', patch.fullName || studentId)
-    showToast('Đã cập nhật học sinh')
+    if (isFirebaseConfigured) upsertDoc('students', studentId, { ...patch }).catch(console.warn)
+    showToast('Đã cập nhật HS')
     setModal(null)
   }
 
   const downloadCsvTemplate = () => {
-    downloadCSV('mau-import-hoc-sinh.csv', [
-      ['STT', 'Họ và tên', 'Giới tính', 'Tổ', 'Chức vụ', 'SĐT PH', 'Ghi chú'],
-      ['1', 'Nguyễn Văn A', 'Nam', 'Tổ 1', '', '0901234567', ''],
-    ])
+    downloadCSV('mau-import-hoc-sinh.csv', [['STT', 'Họ và tên', 'Giới tính', 'Tổ', 'Chức vụ', 'SĐT PH', 'Ghi chú'], ['1', 'Nguyễn Văn A', 'Nam', 'Tổ 1', '', '0901234567', '']])
     showToast('Đã tải mẫu CSV')
   }
 
@@ -411,8 +404,15 @@ export default function App() {
           const phone = phoneIdx >= 0 ? (row[phoneIdx] || '').trim() : ''
           imported.push({ id: uid(), stt: i, fullName, birthDate: '2017-01-01', gender: 'Nam', groupId: g?.id || 'g1', position: '', parentPhone: phone, parentCode: phone, notes: '', active: true })
         }
-        setStudents(prev => { const m = [...prev]; imported.forEach(ns => { if (!m.find(x => x.fullName === ns.fullName && x.active)) m.push(ns) }); return m })
-        if (isFirebaseConfigured) imported.forEach(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>).catch(console.error))
+        setStudents(prev => {
+          const m = [...prev]
+          imported.forEach(ns => {
+            const key = ns.fullName.toLowerCase()
+            if (!m.find(x => x.fullName.toLowerCase() === key && x.active)) m.push(ns)
+          })
+          return m.map((s, i) => ({ ...s, stt: i + 1 }))
+        })
+        if (isFirebaseConfigured) imported.forEach(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>).catch(console.warn))
         showToast(`Import ${imported.length} HS`)
       } catch { showToast('Lỗi CSV') }
     }
@@ -437,14 +437,14 @@ export default function App() {
         try {
           const email = 'quanlyhocsinh@qlcn.app'
           try { await firebaseLogin(email, p) } catch { await firebaseRegister(email, p); await firebaseLogin(email, p) }
-          setSyncStatus('live'); setRole('teacher'); showToast('Đăng nhập Firebase (GVCN)')
-        } catch { setSyncStatus('error'); showToast('Firebase lỗi – local') }
+          setSyncStatus('live')
+        } catch { setSyncStatus('error') }
       }
       setRole('teacher'); setLinkedStudentId(null); setLoggedIn(true); return
     }
-    if (u === 'loptruong' && p === 'bcs1234') { setRole('classPresident'); setLinkedStudentId(null); setLoggedIn(true); showToast('Lớp trưởng'); return }
-    if (u === 'phohoctap' && p === 'bcs1234') { setRole('viceStudy'); setLinkedStudentId(null); setLoggedIn(true); showToast('LP học tập'); return }
-    if (u === 'phokyluat' && p === 'bcs1234') { setRole('viceDiscipline'); setLinkedStudentId(null); setLoggedIn(true); showToast('LP kỷ luật'); return }
+    if (u === 'loptruong' && p === 'bcs1234') { setRole('classPresident'); setLinkedStudentId(null); setLoggedIn(true); return }
+    if (u === 'phohoctap' && p === 'bcs1234') { setRole('viceStudy'); setLinkedStudentId(null); setLoggedIn(true); return }
+    if (u === 'phokyluat' && p === 'bcs1234') { setRole('viceDiscipline'); setLinkedStudentId(null); setLoggedIn(true); return }
     {
       const pool = (students.length ? students : SAMPLE_STUDENTS).filter(s => s.active)
       const child = pool.find(s =>
@@ -460,7 +460,7 @@ export default function App() {
         }
       }
     }
-    if (u === 'phuhuynh' && p === 'view1234') { setRole('parent'); setLinkedStudentId(null); setLoggedIn(true); showToast('PH xem cả lớp'); return }
+    if (u === 'phuhuynh' && p === 'view1234') { setRole('parent'); setLinkedStudentId(null); setLoggedIn(true); return }
     if (u === 'demo' && p === 'demo') { setRole('teacher'); loadDemo(); return }
     setLoginError('Sai tài khoản hoặc mật khẩu')
   }
@@ -545,22 +545,13 @@ export default function App() {
               <h2 className="text-2xl font-bold text-emerald-900">Tổng quan</h2>
               {role === 'parent' && linkedStudentId && (
                 <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-sm text-teal-800">
-                  Đang xem điểm của: <strong>{students.find(s => s.id === linkedStudentId)?.fullName || SAMPLE_STUDENTS.find(s => s.id === linkedStudentId)?.fullName}</strong>
+                  Đang xem: <strong>{students.find(s => s.id === linkedStudentId)?.fullName}</strong>
                 </div>
               )}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[{ l: 'Sĩ số', v: students.filter(s => s.active).length }, { l: 'Giao dịch', v: transactions.length }, { l: 'Tổ', v: groups.length }, { l: 'Quy định', v: rules.length }].map(c => (
                   <div key={c.l} className="bg-white rounded-2xl p-4 border border-emerald-100"><p className="text-2xl font-bold text-emerald-900">{c.v}</p><p className="text-xs text-emerald-600">{c.l}</p></div>
                 ))}
-              </div>
-              <div className="bg-white rounded-2xl p-5 border border-amber-200">
-                <h3 className="font-semibold text-amber-800 mb-2">HS cần quan tâm (tuần {week})</h3>
-                <ul className="text-sm space-y-1">
-                  {filteredStudents.map(s => ({ s, sc: weekScore(s.id, week) })).filter(x => x.sc < 0).sort((a, b) => a.sc - b.sc).slice(0, 8).map(({ s, sc }) => (
-                    <li key={s.id} className="flex justify-between"><span>{s.fullName}</span><span className="text-red-600 font-semibold">{sc}</span></li>
-                  ))}
-                  {filteredStudents.filter(s => weekScore(s.id, week) < 0).length === 0 && <li className="text-gray-400">Không có</li>}
-                </ul>
               </div>
             </div>
           )}
@@ -573,7 +564,7 @@ export default function App() {
                 <button disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markAttendance('present')} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm disabled:opacity-40">✅ Cả lớp</button>
               </div>
               <div className="bg-white rounded-2xl border overflow-x-auto">
-                <table className="w-full text-sm min-w-[600px]">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead className="bg-emerald-50"><tr><th className="px-3 py-2 text-left">STT</th><th className="px-3 py-2 text-left">Họ tên</th><th className="px-3 py-2 text-center">Từng em</th></tr></thead>
                   <tbody>
                     {filteredStudents.map(s => (
@@ -581,10 +572,10 @@ export default function App() {
                         <td className="px-3 py-2">{s.stt}</td>
                         <td className="px-3 py-2 font-medium">{s.fullName}</td>
                         <td className="px-3 py-2"><div className="flex gap-1 justify-center">
-                          <button disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'present')} className="text-xs px-1.5 py-1 rounded bg-emerald-100">✅</button>
-                          <button disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'late')} className="text-xs px-1.5 py-1 rounded bg-amber-100">⏰</button>
-                          <button disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'excused')} className="text-xs px-1.5 py-1 rounded bg-blue-100">📝</button>
-                          <button disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'absent')} className="text-xs px-1.5 py-1 rounded bg-red-100">❌</button>
+                          <button type="button" disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'present')} className="text-xs px-2 py-1 rounded bg-emerald-100">✅</button>
+                          <button type="button" disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'late')} className="text-xs px-2 py-1 rounded bg-amber-100">⏰</button>
+                          <button type="button" disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'excused')} className="text-xs px-2 py-1 rounded bg-blue-100">📝</button>
+                          <button type="button" disabled={!canAttendance(role)||!!lockedWeeks[week]} onClick={() => void markOneAttendance(s.id, 'absent')} className="text-xs px-2 py-1 rounded bg-red-100">❌</button>
                         </div></td>
                       </tr>
                     ))}
@@ -606,7 +597,7 @@ export default function App() {
                 </div>
               </div>
               <div className="bg-white rounded-2xl border overflow-x-auto">
-                <table className="w-full text-sm min-w-[600px]">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead className="bg-emerald-50"><tr><th className="px-3 py-2 text-left">STT</th><th className="px-3 py-2 text-left">Họ tên</th><th className="px-3 py-2 text-center">Điểm</th><th className="px-3 py-2 text-center">Thao tác</th></tr></thead>
                   <tbody>
                     {filteredStudents.map(s => {
@@ -617,7 +608,7 @@ export default function App() {
                           <td className="px-3 py-2 font-medium">{s.fullName}</td>
                           <td className={`px-3 py-2 text-center font-semibold ${sc < 0 ? 'text-red-600' : ''}`}>{sc}</td>
                           <td className="px-3 py-2 text-center">
-                            <button disabled={!!lockedWeeks[week] || role === 'parent'} onClick={() => setModal({ type: 'score', studentId: s.id })} className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-lg disabled:opacity-40">Ghi nhận</button>
+                            <button type="button" disabled={!!lockedWeeks[week] || role === 'parent'} onClick={() => setModal({ type: 'score', studentId: s.id })} className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-lg disabled:opacity-40">Ghi nhận</button>
                           </td>
                         </tr>
                       )
@@ -636,8 +627,8 @@ export default function App() {
                         <span className="truncate">{st?.fullName} · {ru?.name} · <strong>{t.points > 0 ? '+' : ''}{t.points}</strong></span>
                         {canDeleteTx(role) && !lockedWeeks[week] && (
                           <span className="flex gap-2 shrink-0">
-                            <button className="text-xs text-emerald-700" onClick={() => { setEditForm(f => ({ ...f, ruleId: t.ruleId, note: t.note || '' })); setModal({ type: 'editTx', txId: t.id, studentId: t.studentId }) }}>Sửa</button>
-                            <button className="text-xs text-red-600" onClick={() => void deleteTransaction(t.id)}>Xóa</button>
+                            <button type="button" className="text-xs text-emerald-700" onClick={() => { setEditForm(f => ({ ...f, ruleId: t.ruleId, note: t.note || '' })); setModal({ type: 'editTx', txId: t.id, studentId: t.studentId }) }}>Sửa</button>
+                            <button type="button" className="text-xs text-red-600" onClick={() => void deleteTransaction(t.id)}>Xóa</button>
                           </span>
                         )}
                       </li>
@@ -673,11 +664,7 @@ export default function App() {
                 <h2 className="text-2xl font-bold text-emerald-900">Báo bài</h2>
                 <div className="flex flex-wrap gap-2 items-center">
                   <select value={week} onChange={e => setWeek(Number(e.target.value))} className="border rounded-lg px-2 py-1 text-sm">{Array.from({ length: classInfo.totalWeeks }, (_, i) => i + 1).map(w => <option key={w} value={w}>Tuần {w}</option>)}</select>
-                  <span className="text-xs">In từ</span>
-                  <input type="number" min={1} max={classInfo.totalWeeks} value={printWeekFrom} onChange={e => setPrintWeekFrom(Number(e.target.value) || 1)} className="w-14 border rounded px-1 py-1 text-sm" />
-                  <span className="text-xs">đến</span>
-                  <input type="number" min={1} max={classInfo.totalWeeks} value={printWeekTo} onChange={e => setPrintWeekTo(Number(e.target.value) || 1)} className="w-14 border rounded px-1 py-1 text-sm" />
-                  <button onClick={() => window.print()} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm flex items-center gap-1"><Printer className="w-4 h-4" /> In</button>
+                  <button type="button" onClick={() => window.print()} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm flex items-center gap-1"><Printer className="w-4 h-4" /> In</button>
                 </div>
               </div>
               <div className="bg-white rounded-2xl border overflow-x-auto print:hidden">
@@ -689,35 +676,31 @@ export default function App() {
                         <td className="px-2 py-2">Tiết {p + 1}</td>
                         {DAYS.map((d, i) => (
                           <td key={d} className="px-1 py-1">
-                            <input className="w-full border border-dashed rounded px-1 py-2 text-xs text-center" value={lessons[`${week}-${i}-${p}`] || ''} onChange={e => { const k = `${week}-${i}-${p}`; setLessons(prev => ({ ...prev, [k]: e.target.value })); if (isFirebaseConfigured) upsertDoc('assignments', k, { week, day: i, period: p, content: e.target.value }).catch(console.error) }} disabled={role === 'parent'} />
+                            <input
+                              className="w-full border border-dashed rounded px-1 py-2 text-xs text-center"
+                              value={lessons[`${week}-${i}-${p}`] || ''}
+                              onChange={e => {
+                                const k = `${week}-${i}-${p}`
+                                const val = e.target.value
+                                setLessons(prev => {
+                                  const next = { ...prev, [k]: val }
+                                  try {
+                                    const raw = localStorage.getItem(STORAGE_KEY)
+                                    const base = raw ? JSON.parse(raw) : {}
+                                    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...base, lessons: next }))
+                                  } catch {}
+                                  return next
+                                })
+                                if (isFirebaseConfigured) upsertDoc('assignments', k, { id: k, week, day: i, period: p, content: val }).catch(console.warn)
+                              }}
+                              disabled={role === 'parent'}
+                            />
                           </td>
                         ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
-              <div className="hidden print:block">
-                {Array.from({ length: Math.max(0, printWeekTo - printWeekFrom + 1) }, (_, i) => printWeekFrom + i).filter(w => w >= 1 && w <= classInfo.totalWeeks).map(w => {
-                  const days = classInfo.week1StartDate ? getWeekDates(classInfo.week1StartDate, w) : []
-                  return (
-                    <div key={w} className="print-page mb-6" style={{ pageBreakAfter: 'always' }}>
-                      <div className="text-center border-b pb-2 mb-3">
-                        <p className="text-xs">{classInfo.schoolName}</p>
-                        <h3 className="text-lg font-bold">BÁO BÀI – LỚP {classInfo.className}</h3>
-                        <p className="text-sm">Tuần {w}{days[0] ? ` (${formatDate(days[0])} – ${formatDate(days[5] || days[0])})` : ''}</p>
-                      </div>
-                      <table className="w-full text-xs border-collapse border">
-                        <thead><tr className="bg-emerald-50"><th className="border px-1 py-1">Tiết</th>{DAYS.map((d, i) => <th key={d} className="border px-1 py-1">{d}</th>)}</tr></thead>
-                        <tbody>
-                          {Array.from({ length: classInfo.periodsPerDay }, (_, p) => (
-                            <tr key={p}><td className="border px-1 py-2">Tiết {p + 1}</td>{DAYS.map((d, i) => <td key={d} className="border px-1 py-2 text-center">{lessons[`${w}-${i}-${p}`] || ''}</td>)}</tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                })}
               </div>
             </div>
           )}
@@ -727,9 +710,30 @@ export default function App() {
               <div className="flex flex-wrap gap-2 justify-between">
                 <h2 className="text-2xl font-bold text-emerald-900">Học sinh / PH</h2>
                 {canEditStudents(role) && (
-                  <div className="flex gap-2">
-                    <button onClick={downloadCsvTemplate} className="border px-3 py-2 rounded-xl text-sm">Mẫu CSV</button>
-                    <button onClick={() => fileImportRef.current?.click()} className="border px-3 py-2 rounded-xl text-sm">Import</button>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => {
+                      const name = prompt('Họ và tên học sinh mới:')
+                      if (!name?.trim()) return
+                      const phone = prompt('SĐT phụ huynh:') || ''
+                      const stt = students.filter(s => s.active).length + 1
+                      const ns: Student = { id: uid(), stt, fullName: name.trim(), birthDate: '2017-01-01', gender: 'Nam', groupId: groups[0]?.id || 'g1', position: '', parentPhone: phone.trim(), parentCode: phone.trim(), notes: '', active: true }
+                      setStudents(prev => [...prev, ns])
+                      if (isFirebaseConfigured) upsertDoc('students', ns.id, ns as unknown as Record<string, unknown>).catch(console.warn)
+                      showToast('Đã thêm HS')
+                    }} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm">+ Thêm HS</button>
+                    <button type="button" onClick={downloadCsvTemplate} className="border px-3 py-2 rounded-xl text-sm">Mẫu CSV</button>
+                    <button type="button" onClick={() => fileImportRef.current?.click()} className="border px-3 py-2 rounded-xl text-sm">Import</button>
+                    <button type="button" onClick={() => {
+                      const byKey = new Map<string, Student>()
+                      for (const s of students.filter(x => x.active)) {
+                        const key = `${s.fullName.trim().toLowerCase()}|${(s.parentPhone || '').replace(/\D/g, '')}`
+                        if (!byKey.has(key)) byKey.set(key, s)
+                      }
+                      const list = Array.from(byKey.values()).map((s, i) => ({ ...s, stt: i + 1 }))
+                      const removed = students.filter(s => s.active).length - list.length
+                      setStudents(list)
+                      showToast(removed > 0 ? `Đã gỡ ${removed} bản trùng` : 'Không có bản trùng')
+                    }} className="border px-3 py-2 rounded-xl text-sm text-amber-700">Gỡ trùng</button>
                     <input ref={fileImportRef} type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importStudentsCSV(f) }} />
                   </div>
                 )}
@@ -746,7 +750,7 @@ export default function App() {
                         <td className="px-3 py-2">{s.parentPhone || '—'}</td>
                         <td className="px-3 py-2 text-center">{weekScore(s.id, week)}</td>
                         <td className="px-3 py-2 text-center">
-                          {canEditStudents(role) && <button className="text-xs text-teal-700 font-medium" onClick={() => { setEditForm({ ruleId: '', note: '', fullName: s.fullName, groupId: s.groupId, parentPhone: s.parentPhone || '', parentCode: s.parentCode || s.parentPhone || '', position: s.position || '' }); setModal({ type: 'editStudent', studentId: s.id }) }}>Sửa</button>}
+                          {canEditStudents(role) && <button type="button" className="text-xs text-teal-700 font-medium" onClick={() => { setEditForm({ ruleId: '', note: '', fullName: s.fullName, groupId: s.groupId, parentPhone: s.parentPhone || '', parentCode: s.parentCode || s.parentPhone || '', position: s.position || '' }); setModal({ type: 'editStudent', studentId: s.id }) }}>Sửa</button>}
                         </td>
                       </tr>
                     ))}
@@ -758,13 +762,13 @@ export default function App() {
 
           {page === 'reports' && (
             <div className="space-y-4">
-              <div className="flex justify-between print:hidden"><h2 className="text-2xl font-bold text-emerald-900">Báo cáo PH</h2><button onClick={() => window.print()} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">In A4</button></div>
+              <div className="flex justify-between print:hidden"><h2 className="text-2xl font-bold text-emerald-900">Báo cáo PH</h2><button type="button" onClick={() => window.print()} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">In A4</button></div>
               {filteredStudents.map(s => {
                 const sc = weekScore(s.id, week)
                 const txs = transactions.filter(t => t.studentId === s.id && t.weekNumber === week)
                 return (
                   <div key={s.id} className="print-page bg-white border rounded-2xl p-6 mb-4">
-                    <h3 className="font-bold text-center">BÁO CÁO RÈN LUYỆN – {s.fullName}</h3>
+                    <h3 className="font-bold text-center">BÁO CÁO – {s.fullName}</h3>
                     <p className="text-sm text-center text-gray-600">Tuần {week} · Tổng {sc}</p>
                     <ul className="text-sm mt-3">{txs.map(t => { const r = rules.find(x => x.id === t.ruleId); return <li key={t.id}>{r?.name}: {t.points}</li> })}</ul>
                   </div>
@@ -777,7 +781,7 @@ export default function App() {
             <div className="space-y-4">
               <h2 className="text-2xl font-bold text-emerald-900">Báo cáo tháng</h2>
               <div className="bg-white rounded-2xl border overflow-x-auto">
-                <table className="w-full text-sm min-w-[600px]">
+                <table className="w-full text-sm min-w-[500px]">
                   <thead className="bg-emerald-50"><tr><th className="px-2 py-2 text-left">Họ tên</th><th className="px-2 py-2 text-center">Tổng 4 tuần</th><th className="px-2 py-2 text-center">XL</th></tr></thead>
                   <tbody>
                     {filteredStudents.map(s => {
@@ -798,7 +802,7 @@ export default function App() {
                 {([['schoolName', 'Trường'], ['className', 'Lớp'], ['homeroomTeacher', 'GVCN'], ['slogan', 'Khẩu hiệu']] as const).map(([k, l]) => (
                   <div key={k}><label className="text-sm">{l}</label><input className="w-full border rounded-lg px-3 py-2 text-sm" value={(classInfo as unknown as Record<string, string>)[k] || ''} onChange={e => setClassInfo(prev => ({ ...prev, [k]: e.target.value }))} /></div>
                 ))}
-                <button onClick={async () => { if (isFirebaseConfigured) await saveClassInfo(classInfo as unknown as Record<string, unknown>); showToast('Đã lưu') }} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Lưu</button>
+                <button type="button" onClick={async () => { if (isFirebaseConfigured) await saveClassInfo(classInfo as unknown as Record<string, unknown>).catch(console.warn); showToast('Đã lưu') }} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Lưu</button>
               </div>
             </div>
           )}
@@ -811,7 +815,7 @@ export default function App() {
           <div className="relative bg-white rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
             <h3 className="font-bold mb-3">Ghi nhận – {students.find(s => s.id === modal.studentId)?.fullName}</h3>
             {rules.filter(r => r.active && canCreateScore(role, r.group)).map(r => (
-              <button key={r.id} disabled={!!lockedWeeks[week]} onClick={() => void addTransaction(modal.studentId!, r.id, weekDays[0] || new Date().toISOString().slice(0, 10))} className="w-full flex justify-between px-3 py-2 border rounded-xl mb-1 text-sm hover:bg-emerald-50">
+              <button key={r.id} type="button" disabled={!!lockedWeeks[week]} onClick={() => void addTransaction(modal.studentId!, r.id, weekDays[0] || attendDate || new Date().toISOString().slice(0, 10))} className="w-full flex justify-between px-3 py-2 border rounded-xl mb-1 text-sm hover:bg-emerald-50">
                 <span>{r.icon} {r.name}</span><span className={r.points < 0 ? 'text-red-600' : 'text-green-600'}>{r.points > 0 ? '+' : ''}{r.points}</span>
               </button>
             ))}
@@ -828,7 +832,7 @@ export default function App() {
               {rules.filter(r => r.active).map(r => <option key={r.id} value={r.id}>{r.name} ({r.points > 0 ? '+' : ''}{r.points})</option>)}
             </select>
             <input value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))} placeholder="Ghi chú" className="w-full border rounded-lg px-3 py-2 text-sm mb-3" />
-            <button onClick={() => void editTransaction(modal.txId!, editForm.ruleId, editForm.note)} className="w-full bg-emerald-600 text-white py-2 rounded-xl">Lưu</button>
+            <button type="button" onClick={() => void editTransaction(modal.txId!, editForm.ruleId, editForm.note)} className="w-full bg-emerald-600 text-white py-2 rounded-xl">Lưu</button>
           </div>
         </div>
       )}
@@ -841,8 +845,8 @@ export default function App() {
             <input value={editForm.fullName} onChange={e => setEditForm(f => ({ ...f, fullName: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Họ tên" />
             <select value={editForm.groupId} onChange={e => setEditForm(f => ({ ...f, groupId: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
             <input value={editForm.parentPhone} onChange={e => setEditForm(f => ({ ...f, parentPhone: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="SĐT PH" />
-            <p className="text-xs text-gray-500">PH đăng nhập: <strong>SĐT PH</strong> · mật khẩu = <strong>view</strong> + 4 số cuối SĐT (vd …4567 → <code>view4567</code>). Không hiện mật khẩu trên màn hình đăng nhập.</p>
-            <button onClick={() => void updateStudent(modal.studentId!, { fullName: editForm.fullName.trim(), groupId: editForm.groupId, parentPhone: editForm.parentPhone.trim(), parentCode: editForm.parentCode.trim() || editForm.parentPhone.trim(), position: editForm.position })} className="w-full bg-emerald-600 text-white py-2 rounded-xl">Lưu</button>
+            <p className="text-xs text-gray-500">PH: SĐT · mật khẩu = view + 4 số cuối (vd …4567 → view4567)</p>
+            <button type="button" onClick={() => void updateStudent(modal.studentId!, { fullName: editForm.fullName.trim(), groupId: editForm.groupId, parentPhone: editForm.parentPhone.trim(), parentCode: editForm.parentCode.trim() || editForm.parentPhone.trim(), position: editForm.position })} className="w-full bg-emerald-600 text-white py-2 rounded-xl">Lưu</button>
           </div>
         </div>
       )}
