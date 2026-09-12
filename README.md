@@ -1,49 +1,42 @@
 # QUẢN LÝ LỚP CHỦ NHIỆM
 
-Ứng dụng quản lý lớp chủ nhiệm – React + TypeScript + Vite.
+Ứng dụng quản lý lớp chủ nhiệm – React + TypeScript + Vite + Firebase.
 
-**Live:** https://quanlyhocsinhtieuhocps.vercel.app
+**Live:** https://quanlyhocsinhphuocson.vercel.app
 
-## Đăng nhập Demo
+## Đăng nhập
 
 | Vai trò | Tài khoản | Mật khẩu |
 |---------|-----------|----------|
 | GVCN | `quanlyhocsinh` | `qlhs1234` |
-| Demo nhanh | `demo` | `demo` |
+| Lớp trưởng | `loptruong` | `bcs1234` |
+| LP học tập | `phohoctap` | `bcs1234` |
+| LP kỷ luật | `phokyluat` | `bcs1234` |
+| PH từng HS | SĐT PH (vd `0901234567`) | `view1234` hoặc 4 số cuối SĐT |
+| PH cả lớp | `phuhuynh` | `view1234` |
+| Demo | `demo` | `demo` |
 
-Hoặc bấm **Vào Demo nhanh + dữ liệu mẫu** trên màn hình đăng nhập.
+## Tính năng chính
 
-## Tính năng
+- Điểm danh cả lớp / từng em
+- Ghi nhận · **sửa** · xóa giao dịch điểm (+ audit)
+- Khóa/mở khóa tuần (MK `qlhs1234` hoặc `MOKHOA`)
+- Thi đua tổ, vi phạm, học tập
+- Báo bài – in nhiều tuần A4
+- Học sinh: sửa SĐT / tổ / mã PH trên UI
+- PH gắn từng HS (chỉ xem điểm con)
+- Báo cáo PH in A4, báo cáo tháng + xếp loại
+- CSV import/export, backup local
+- Firebase realtime (khi đăng nhập GVCN)
 
-- 8 phân hệ: Tổng quan, Nhập điểm tuần, Thi đua tổ, Vi phạm, Học tập, Báo bài/TKB, Rèn luyện cá nhân, Cài đặt lớp
-- Ghi nhận điểm theo quy định (cộng/trừ)
-- Xếp hạng tổ theo tuần
-- Xuất CSV danh sách học sinh & lịch sử điểm
-- Dữ liệu mẫu 12 học sinh, 4 tổ, 12 quy định điểm
-- Lưu localStorage (chế độ Demo)
-- Responsive (điện thoại → desktop)
+## Firebase
 
-## Chạy local
+- Project: `quanlyhocsinh-48840`
+- Config nằm trong `src/services/firebase.ts`
+- Cần thêm domain production vào **Authentication → Settings → Authorized domains**
 
-```bash
-npm install
-npm run dev
-```
+## Deploy
 
-## Deploy Vercel
-
-Repo đã kết nối. Mỗi push lên `main` sẽ tự build lại.
-
-- Framework: Vite
-- Build: `npm run build`
-- Output: `dist`
-
-## Firebase (bước tiếp theo)
-
-Tạo file `.env` với các biến `VITE_FIREBASE_*`. Xem `firestore.rules` và `.env.example`.
-
-## Kiến trúc đã chốt
-
-- Mô hình: 1 lớp độc lập
-- Xếp loại: GVCN tự cấu hình
-- Phụ huynh: 1 tài khoản / học sinh
+- GitHub: https://github.com/trixd2026-max/quanlyhocsinh
+- Vercel: mỗi push `main` → build tự động
+- Framework: Vite · Build: `npm run build` · Output: `dist`
