@@ -48,6 +48,10 @@ if (isFirebaseConfigured) {
 export { app, auth, db }
 export const CLASS_ID = 'main'
 
+export function isFirebaseAuthed(): boolean {
+  return Boolean(auth?.currentUser)
+}
+
 export async function firebaseLogin(email: string, password: string): Promise<User> {
   if (!auth) throw new Error('Firebase chưa cấu hình')
   return (await signInWithEmailAndPassword(auth, email, password)).user
@@ -79,13 +83,21 @@ export async function loadClassInfo(): Promise<Record<string, unknown> | null> {
 }
 
 export function watchCollection<T>(
-  name: string,
+  col: string,
   cb: (items: (T & { id: string })[]) => void,
 ): Unsubscribe {
   if (!db) { cb([]); return () => {} }
-  return onSnapshot(query(collection(db, name)), (snap) => {
-    cb(snap.docs.map((d) => ({ id: d.id, ...(d.data() as T) })))
-  }, (err) => console.error('Firestore watch error', name, err))
+  const q = query(collection(db, col))
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as T) }))
+      cb(items)
+    },
+    (err) => {
+      console.warn('[QLCN] watch', col, err.message)
+    },
+  )
 }
 
 export async function upsertDoc(col: string, id: string, data: Record<string, unknown>): Promise<void> {
@@ -94,7 +106,7 @@ export async function upsertDoc(col: string, id: string, data: Record<string, un
 }
 
 export async function addDocAuto(col: string, data: Record<string, unknown>): Promise<string> {
-  if (!db) throw new Error('Firebase chưa cấu hình')
+  if (!db) return ''
   const ref = await addDoc(collection(db, col), { ...data, createdAt: serverTimestamp() })
   return ref.id
 }
@@ -104,6 +116,7 @@ export async function removeDoc(col: string, id: string): Promise<void> {
   await deleteDoc(doc(db, col, id))
 }
 
+/** Ghi điểm: transaction; lỗi thì fallback setDoc */
 export async function createScoreTransactionAtomic(tx: {
   id: string
   studentId: string
@@ -113,21 +126,33 @@ export async function createScoreTransactionAtomic(tx: {
   points: number
   note: string
   createdBy: string
+  createdAt?: string
 }): Promise<void> {
   if (!db) return
   const txRef = doc(db, 'scoreTransactions', tx.id)
   const lockRef = doc(db, 'weeklyLocks', `week_${tx.weekNumber}`)
-  await runTransaction(db, async (transaction) => {
-    const lockSnap = await transaction.get(lockRef)
-    if (lockSnap.exists() && lockSnap.data()?.locked === true) {
-      throw new Error(`Tuần ${tx.weekNumber} đã khóa – không thể ghi nhận`)
-    }
-    transaction.set(txRef, {
+  try {
+    await runTransaction(db, async (transaction) => {
+      const lockSnap = await transaction.get(lockRef)
+      if (lockSnap.exists() && lockSnap.data()?.locked === true) {
+        throw new Error(`Tuần ${tx.weekNumber} đã khóa – không thể ghi nhận`)
+      }
+      transaction.set(txRef, {
+        ...tx,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes('đã khóa')) throw e
+    console.warn('[QLCN] atomic fail, fallback setDoc', msg)
+    await setDoc(txRef, {
       ...tx,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    })
-  })
+    }, { merge: true })
+  }
 }
 
 export async function setWeekLocked(weekNumber: number, locked: boolean, by: string): Promise<void> {
@@ -137,7 +162,6 @@ export async function setWeekLocked(weekNumber: number, locked: boolean, by: str
   }, { merge: true })
 }
 
-/** Ghi nhật ký thao tác */
 export async function writeAuditLog(entry: {
   action: string
   detail: string
@@ -145,11 +169,15 @@ export async function writeAuditLog(entry: {
   role?: string
 }): Promise<void> {
   if (!db) return
-  await addDoc(collection(db, 'auditLogs'), {
-    ...entry,
-    at: serverTimestamp(),
-    clientAt: new Date().toISOString(),
-  })
+  try {
+    await addDoc(collection(db, 'auditLogs'), {
+      ...entry,
+      at: serverTimestamp(),
+      clientAt: new Date().toISOString(),
+    })
+  } catch (e) {
+    console.warn('[QLCN] audit', e)
+  }
 }
 
 export async function ensureUserProfile(uid: string, profile: Record<string, unknown>): Promise<void> {
