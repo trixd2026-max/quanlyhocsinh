@@ -6,8 +6,8 @@ import {
   Download, Upload, Printer, Shield, UserCheck, Lock, Unlock, Phone, FileText
 } from 'lucide-react'
 import {
-  isFirebaseConfigured, firebaseLogin, firebaseRegister,
-  saveClassInfo, watchCollection, upsertDoc,
+  isFirebaseConfigured, firebaseLogin, firebaseLogout, loadUserAccess,
+  saveClassInfo, watchCollection, watchCollectionWhere, watchDocument, upsertDoc,
   createScoreTransactionAtomic, setWeekLocked, writeAuditLog, removeDoc,
 } from './services/firebase'
 
@@ -25,6 +25,9 @@ function canCreateScore(role: Role, group: string) {
 function canLockWeek(role: Role) { return role === 'teacher' }
 function canEditStudents(role: Role) { return role === 'teacher' }
 function canEditSettings(role: Role) { return role === 'teacher' }
+function canEditAssignments(role: Role) {
+  return role === 'teacher' || role === 'classPresident' || role === 'viceStudy' || role === 'viceDiscipline'
+}
 function canAttendance(role: Role) {
   return role === 'teacher' || role === 'classPresident' || role === 'viceDiscipline'
 }
@@ -36,9 +39,19 @@ function classifyScore(total: number, thresholds = { good: 80, fair: 50 }) {
   if (total >= thresholds.fair) return { label: 'Khá', color: 'text-blue-600', bg: 'bg-blue-50' }
   return { label: 'TB', color: 'text-amber-600', bg: 'bg-amber-50' }
 }
-function parentPasswordFromPhone(phone: string): string {
-  const tail = (phone || '').replace(/\D/g, '').slice(-4)
-  return tail.length === 4 ? `view${tail}` : ''
+const LOGIN_EMAILS: Record<string, string> = {
+  quanlyhocsinh: 'quanlyhocsinh@qlcn.app',
+  loptruong: 'loptruong@qlcn.app',
+  phohoctap: 'phohoctap@qlcn.app',
+  phokyluat: 'phokyluat@qlcn.app',
+}
+function loginEmailFromUsername(username: string): string {
+  const normalized = username.trim().toLowerCase()
+  if (normalized.includes('@')) return normalized
+  if (LOGIN_EMAILS[normalized]) return LOGIN_EMAILS[normalized]
+  const phone = normalized.replace(/\D/g, '')
+  if (phone.length >= 8) return `parent.${phone}@qlcn.app`
+  return `${normalized.replace(/[^a-z0-9._-]/g, '')}@qlcn.app`
 }
 
 interface ClassInfo {
@@ -60,7 +73,7 @@ interface ScoreRule {
 }
 interface Transaction {
   id: string; studentId: string; weekNumber: number; date: string
-  ruleId: string; points: number; note: string; createdBy: string; createdAt: string
+  ruleId: string; category: string; points: number; note: string; createdBy: string; createdAt: string
 }
 
 const DEFAULT_RULES: ScoreRule[] = [
@@ -194,13 +207,14 @@ export default function App() {
   const [loginUser, setLoginUser] = useState('')
   const [loginPass, setLoginPass] = useState('')
   const [loginError, setLoginError] = useState('')
-  const [syncStatus, setSyncStatus] = useState<'off' | 'live' | 'error'>(isFirebaseConfigured ? 'live' : 'off')
+  const [cloudSync, setCloudSync] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<'off' | 'live' | 'error'>('off')
   const fileImportRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     try {
       const q = new URLSearchParams(window.location.search)
-      if (q.get('view') === 'parent') { setRole('parent'); setLoginUser('phuhuynh') }
+      if (q.get('view') === 'parent') setLoginUser('')
     } catch {}
   }, [])
 
@@ -214,59 +228,73 @@ export default function App() {
       if (d.lockedWeeks) setLockedWeeks(d.lockedWeeks)
       if (d.lessons) setLessons(d.lessons)
       if (d.auditLogs) setAuditLogs(d.auditLogs)
-      if (d.role) setRole(d.role)
-      if (d.loggedIn) setLoggedIn(true)
-      if (d.demoLoaded) setDemoLoaded(true)
-      if (d.linkedStudentId) setLinkedStudentId(d.linkedStudentId)
+      if (d.demoLoaded) {
+        setDemoLoaded(true)
+        setRole('teacher')
+        setLoggedIn(true)
+      }
     }
   }, [])
 
   useEffect(() => {
-    if (loggedIn) saveData({ classInfo, students, groups, transactions, lockedWeeks, lessons, auditLogs, role, loggedIn, demoLoaded, linkedStudentId })
-  }, [classInfo, students, groups, transactions, lockedWeeks, lessons, auditLogs, role, loggedIn, demoLoaded, linkedStudentId])
+    if (loggedIn && demoLoaded && !cloudSync) {
+      saveData({ classInfo, students, groups, transactions, lockedWeeks, lessons, auditLogs, demoLoaded })
+    }
+  }, [classInfo, students, groups, transactions, lockedWeeks, lessons, auditLogs, loggedIn, demoLoaded, cloudSync])
 
   useEffect(() => {
-    if (!loggedIn || !isFirebaseConfigured) return
-    const u1 = watchCollection<Student>('students', (items) => {
-      if (!items.length) return
+    if (!loggedIn || !cloudSync) return
+    const unsubs: Array<() => void> = []
+    const applyStudents = (items: Student[]) => {
       const mapped = items.map(s => ({ ...s, active: s.active !== false }))
       const byKey = new Map<string, Student>()
       for (const s of mapped) {
         const key = `${(s.fullName || '').trim().toLowerCase()}|${(s.parentPhone || '').replace(/\D/g, '')}`
         const prev = byKey.get(key)
-        if (!prev) byKey.set(key, s)
-        else if (s.active && !prev.active) byKey.set(key, s)
+        if (!prev || (s.active && !prev.active)) byKey.set(key, s)
       }
       const list = Array.from(byKey.values()).filter(s => s.active).sort((a, b) => (a.stt || 0) - (b.stt || 0))
       setStudents(list.map((s, i) => ({ ...s, stt: i + 1 })))
-    })
-    const u2 = watchCollection<Transaction>('scoreTransactions', (items) => { if (items.length) setTransactions(items) })
-    const u3 = watchCollection<Group>('groups', (items) => { if (items.length) setGroups(items.sort((a, b) => a.order - b.order)) })
-    const u4 = watchCollection<{ weekNumber: number; locked: boolean }>('weeklyLocks', (items) => {
+    }
+    if (role === 'parent' && linkedStudentId) {
+      unsubs.push(watchDocument<Student>('students', linkedStudentId, item => applyStudents(item ? [item] : [])))
+      unsubs.push(watchCollectionWhere<Transaction>('scoreTransactions', 'studentId', linkedStudentId, setTransactions))
+    } else {
+      unsubs.push(watchCollection<Student>('students', applyStudents))
+      unsubs.push(watchCollection<Transaction>('scoreTransactions', setTransactions))
+    }
+    unsubs.push(watchCollection<Group>('groups', items => setGroups(items.sort((a, b) => a.order - b.order))))
+    unsubs.push(watchCollection<{ weekNumber: number; locked: boolean }>('weeklyLocks', (items) => {
       const map: Record<number, boolean> = {}; items.forEach(i => { map[i.weekNumber] = !!i.locked }); setLockedWeeks(map)
-    })
-    const u5 = watchCollection<{ action: string; detail: string; by: string; clientAt: string }>('auditLogs', (items) => {
-      setAuditLogs([...items].sort((a, b) => (b.clientAt || '').localeCompare(a.clientAt || '')).slice(0, 100))
-    })
-    return () => { u1(); u2(); u3(); u4(); u5() }
-  }, [loggedIn])
+    }))
+    unsubs.push(watchDocument<ClassInfo>('classes', 'main', item => {
+      if (item) setClassInfo(prev => ({ ...prev, ...item }))
+    }))
+    unsubs.push(watchCollection<{ week: number; day: number; period: number; content: string }>('assignments', items => {
+      const next: Record<string, string> = {}
+      items.forEach(item => { next[`${item.week}-${item.day}-${item.period}`] = item.content || '' })
+      setLessons(next)
+    }))
+    if (role === 'teacher') {
+      unsubs.push(watchCollection<{ action: string; detail: string; by: string; clientAt: string }>('auditLogs', (items) => {
+        setAuditLogs([...items].sort((a, b) => (b.clientAt || '').localeCompare(a.clientAt || '')).slice(0, 100))
+      }))
+    }
+    return () => unsubs.forEach(unsub => unsub())
+  }, [loggedIn, cloudSync, role, linkedStudentId])
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
   const logAction = (action: string, detail: string) => {
     const entry = { id: uid(), action, detail, by: ROLE_LABELS[role], clientAt: new Date().toISOString() }
     setAuditLogs(prev => [entry, ...prev].slice(0, 100))
-    if (isFirebaseConfigured) writeAuditLog({ action, detail, by: ROLE_LABELS[role], role }).catch(console.warn)
+    if (cloudSync) writeAuditLog({ action, detail, by: ROLE_LABELS[role], role }).catch(console.warn)
   }
 
   const loadDemo = () => {
     setStudents(SAMPLE_STUDENTS); setGroups(DEFAULT_GROUPS)
     setClassInfo({ schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ', schoolYear: '2026 – 2027', week1StartDate: '2026-08-17', totalWeeks: 35, periodsPerDay: 7, slogan: 'Chăm ngoan - Học giỏi' })
+    setCloudSync(false); setSyncStatus('off')
     setDemoLoaded(true); setLoggedIn(true); setRole('teacher'); setLinkedStudentId(null)
-    if (isFirebaseConfigured) {
-      SAMPLE_STUDENTS.forEach(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>).catch(console.warn))
-      DEFAULT_GROUPS.forEach(g => upsertDoc('groups', g.id, g as unknown as Record<string, unknown>).catch(console.warn))
-      saveClassInfo({ schoolName: 'Trường tiểu học Phước Sơn', className: '3A3', homeroomTeacher: 'Đỗ Giang Vũ', schoolYear: '2026 – 2027', week1StartDate: '2026-08-17', totalWeeks: 35, periodsPerDay: 7, slogan: 'Chăm ngoan - Học giỏi' }).catch(console.warn)
-    }
     showToast('Đã tải dữ liệu mẫu')
   }
 
@@ -283,19 +311,17 @@ export default function App() {
     if (!canCreateScore(role, rule.group)) { showToast('Không có quyền ghi nhận'); return }
     if (lockedWeeks[week]) { showToast(`Tuần ${week} đã khóa`); return }
     const student = students.find(s => s.id === studentId)
-    const tx: Transaction = { id: uid(), studentId, weekNumber: week, date, ruleId, points: rule.points, note: '', createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
+    const tx: Transaction = { id: uid(), studentId, weekNumber: week, date, ruleId, category: rule.group, points: rule.points, note: '', createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
     setTransactions(prev => [...prev, tx])
     setModal(null)
     showToast(`Đã ghi nhận: ${rule.name} (${rule.points > 0 ? '+' : ''}${rule.points})`)
     logAction('ghi_diem', `${student?.fullName}: ${rule.name}`)
-    if (isFirebaseConfigured) {
+    if (cloudSync) {
       try { await createScoreTransactionAtomic(tx) }
       catch (e: unknown) {
         const msg = e instanceof Error ? e.message : ''
-        if (msg.includes('đã khóa')) {
-          setTransactions(prev => prev.filter(t => t.id !== tx.id))
-          showToast(msg)
-        } else console.warn(msg)
+        setTransactions(prev => prev.filter(t => t.id !== tx.id))
+        showToast(msg || 'Không thể lưu giao dịch')
       }
     }
   }
@@ -304,13 +330,19 @@ export default function App() {
     if (!canLockWeek(role)) { showToast('Chỉ GVCN'); return }
     const isLocked = !!lockedWeeks[week]
     if (isLocked) {
-      const pwd = prompt('MK mở khóa (qlhs1234 hoặc MOKHOA):')
-      if (pwd === null) return
-      if (pwd !== 'qlhs1234' && pwd.trim().toUpperCase() !== 'MOKHOA') { showToast('Sai MK'); return }
+      if (!confirm(`Mở khóa tuần ${week}?`)) return
     } else if (!confirm(`Khóa tuần ${week}?`)) return
     const next = !isLocked
     setLockedWeeks(prev => ({ ...prev, [week]: next }))
-    if (isFirebaseConfigured) setWeekLocked(week, next, ROLE_LABELS[role]).catch(console.warn)
+    if (cloudSync) {
+      try {
+        await setWeekLocked(week, next, ROLE_LABELS[role])
+      } catch {
+        setLockedWeeks(prev => ({ ...prev, [week]: isLocked }))
+        showToast('Không thể cập nhật khóa tuần')
+        return
+      }
+    }
     showToast(next ? `Đã khóa tuần ${week}` : `Đã mở khóa tuần ${week}`)
   }
 
@@ -323,11 +355,18 @@ export default function App() {
     const batch: Transaction[] = []
     for (const s of students.filter(x => x.active)) {
       if (transactions.some(t => t.studentId === s.id && t.date === attendDate && ['r1','r6','r7','r8'].includes(t.ruleId))) continue
-      batch.push({ id: uid(), studentId: s.id, weekNumber: week, date: attendDate, ruleId: rule.id, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() })
+      batch.push({ id: uid(), studentId: s.id, weekNumber: week, date: attendDate, ruleId: rule.id, category: rule.group, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() })
     }
     if (batch.length) setTransactions(prev => [...prev, ...batch])
     showToast(`Điểm danh: ${batch.length} HS`)
-    if (isFirebaseConfigured) for (const tx of batch) createScoreTransactionAtomic(tx).catch(console.warn)
+    if (cloudSync && batch.length) {
+      const results = await Promise.allSettled(batch.map(tx => createScoreTransactionAtomic(tx)))
+      const failedIds = results.flatMap((result, index) => result.status === 'rejected' ? [batch[index].id] : [])
+      if (failedIds.length) {
+        setTransactions(prev => prev.filter(t => !failedIds.includes(t.id)))
+        showToast(`Không lưu được ${failedIds.length} bản ghi điểm danh`)
+      }
+    }
   }
 
   const markOneAttendance = async (studentId: string, status: 'present' | 'late' | 'excused' | 'absent') => {
@@ -338,13 +377,18 @@ export default function App() {
     if (!rule) return
     const oldIds = transactions.filter(t => t.studentId === studentId && t.date === attendDate && ['r1','r6','r7','r8'].includes(t.ruleId)).map(t => t.id)
     const student = students.find(s => s.id === studentId)
-    const tx: Transaction = { id: uid(), studentId, weekNumber: week, date: attendDate, ruleId: rule.id, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
+    const tx: Transaction = { id: uid(), studentId, weekNumber: week, date: attendDate, ruleId: rule.id, category: rule.group, points: rule.points, note: status, createdBy: ROLE_LABELS[role], createdAt: new Date().toISOString() }
+    if (cloudSync) {
+      try {
+        await createScoreTransactionAtomic(tx)
+        await Promise.all(oldIds.map(id => removeDoc('scoreTransactions', id)))
+      } catch {
+        showToast('Không thể cập nhật điểm danh')
+        return
+      }
+    }
     setTransactions(prev => [...prev.filter(t => !oldIds.includes(t.id)), tx])
     showToast(`${student?.fullName}: ${rule.name}`)
-    if (isFirebaseConfigured) {
-      oldIds.forEach(id => removeDoc('scoreTransactions', id).catch(console.warn))
-      createScoreTransactionAtomic(tx).catch(console.warn)
-    }
   }
 
   const deleteTransaction = async (txId: string) => {
@@ -352,8 +396,11 @@ export default function App() {
     const tx = transactions.find(t => t.id === txId)
     if (!tx || lockedWeeks[tx.weekNumber]) { showToast('Không xóa được'); return }
     if (!confirm('Xóa giao dịch?')) return
+    if (cloudSync) {
+      try { await removeDoc('scoreTransactions', txId) }
+      catch { showToast('Không thể xóa giao dịch'); return }
+    }
     setTransactions(prev => prev.filter(t => t.id !== txId))
-    if (isFirebaseConfigured) removeDoc('scoreTransactions', txId).catch(console.warn)
     showToast('Đã xóa')
   }
 
@@ -363,17 +410,23 @@ export default function App() {
     if (!tx || lockedWeeks[tx.weekNumber]) { showToast('Không sửa được'); return }
     const rule = rules.find(r => r.id === newRuleId)
     if (!rule) return
-    const updated = { ...tx, ruleId: newRuleId, points: rule.points, note: note || tx.note }
+    const updated = { ...tx, ruleId: newRuleId, category: rule.group, points: rule.points, note: note || tx.note }
+    if (cloudSync) {
+      try { await upsertDoc('scoreTransactions', txId, { ruleId: newRuleId, category: rule.group, points: rule.points, note: updated.note }) }
+      catch { showToast('Không thể sửa giao dịch'); return }
+    }
     setTransactions(prev => prev.map(t => t.id === txId ? updated : t))
-    if (isFirebaseConfigured) upsertDoc('scoreTransactions', txId, { ruleId: newRuleId, points: rule.points, note: updated.note }).catch(console.warn)
     showToast('Đã sửa')
     setModal(null)
   }
 
   const updateStudent = async (studentId: string, patch: Partial<Student>) => {
     if (!canEditStudents(role)) return
+    if (cloudSync) {
+      try { await upsertDoc('students', studentId, { ...patch }) }
+      catch { showToast('Không thể cập nhật học sinh'); return }
+    }
     setStudents(prev => prev.map(s => s.id === studentId ? { ...s, ...patch } : s))
-    if (isFirebaseConfigured) upsertDoc('students', studentId, { ...patch }).catch(console.warn)
     showToast('Đã cập nhật HS')
     setModal(null)
   }
@@ -386,7 +439,7 @@ export default function App() {
   const importStudentsCSV = (file: File) => {
     if (!canEditStudents(role)) return
     const reader = new FileReader()
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const rows = parseCSV(String(reader.result || ''))
         if (rows.length < 2) return
@@ -404,16 +457,23 @@ export default function App() {
           const phone = phoneIdx >= 0 ? (row[phoneIdx] || '').trim() : ''
           imported.push({ id: uid(), stt: i, fullName, birthDate: '2017-01-01', gender: 'Nam', groupId: g?.id || 'g1', position: '', parentPhone: phone, parentCode: phone, notes: '', active: true })
         }
-        setStudents(prev => {
-          const m = [...prev]
-          imported.forEach(ns => {
-            const key = ns.fullName.toLowerCase()
-            if (!m.find(x => x.fullName.toLowerCase() === key && x.active)) m.push(ns)
-          })
-          return m.map((s, i) => ({ ...s, stt: i + 1 }))
+        const existingKeys = new Set(students.filter(s => s.active).map(s => `${s.fullName.trim().toLowerCase()}|${(s.parentPhone || '').replace(/\D/g, '')}`))
+        const accepted = imported.filter(s => {
+          const key = `${s.fullName.trim().toLowerCase()}|${(s.parentPhone || '').replace(/\D/g, '')}`
+          if (existingKeys.has(key)) return false
+          existingKeys.add(key)
+          return true
         })
-        if (isFirebaseConfigured) imported.forEach(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>).catch(console.warn))
-        showToast(`Import ${imported.length} HS`)
+        if (cloudSync) {
+          try {
+            await Promise.all(accepted.map(s => upsertDoc('students', s.id, s as unknown as Record<string, unknown>)))
+          } catch {
+            showToast('Không thể import lên Firebase')
+            return
+          }
+        }
+        setStudents(prev => [...prev, ...accepted].map((s, i) => ({ ...s, stt: i + 1 })))
+        showToast(`Import ${accepted.length} HS`)
       } catch { showToast('Lỗi CSV') }
     }
     reader.readAsText(file, 'UTF-8')
@@ -432,37 +492,47 @@ export default function App() {
   const handleLogin = async (e?: { preventDefault?: () => void }) => {
     e?.preventDefault?.(); setLoginError('')
     const u = loginUser.trim().toLowerCase(); const p = loginPass
-    if (u === 'quanlyhocsinh' && p === 'qlhs1234') {
-      if (isFirebaseConfigured) {
-        try {
-          const email = 'quanlyhocsinh@qlcn.app'
-          try { await firebaseLogin(email, p) } catch { await firebaseRegister(email, p); await firebaseLogin(email, p) }
-          setSyncStatus('live')
-        } catch { setSyncStatus('error') }
-      }
-      setRole('teacher'); setLinkedStudentId(null); setLoggedIn(true); return
-    }
-    if (u === 'loptruong' && p === 'bcs1234') { setRole('classPresident'); setLinkedStudentId(null); setLoggedIn(true); return }
-    if (u === 'phohoctap' && p === 'bcs1234') { setRole('viceStudy'); setLinkedStudentId(null); setLoggedIn(true); return }
-    if (u === 'phokyluat' && p === 'bcs1234') { setRole('viceDiscipline'); setLinkedStudentId(null); setLoggedIn(true); return }
-    {
-      const pool = (students.length ? students : SAMPLE_STUDENTS).filter(s => s.active)
-      const child = pool.find(s =>
-        (s.parentPhone && (s.parentPhone.replace(/\s/g, '') === u || s.parentPhone === u)) ||
-        (s.parentCode && s.parentCode.toLowerCase() === u)
-      )
-      if (child) {
-        const expectedPass = parentPasswordFromPhone(child.parentPhone)
-        if ((expectedPass && p === expectedPass) || (child.parentCode && p === child.parentCode && String(child.parentCode).startsWith('view'))) {
-          setRole('parent'); setLinkedStudentId(child.id); setLoggedIn(true)
-          if (!students.length) setStudents(SAMPLE_STUDENTS)
-          showToast(`PH xem: ${child.fullName}`); return
-        }
-      }
-    }
-    if (u === 'phuhuynh' && p === 'view1234') { setRole('parent'); setLinkedStudentId(null); setLoggedIn(true); return }
     if (u === 'demo' && p === 'demo') { setRole('teacher'); loadDemo(); return }
-    setLoginError('Sai tài khoản hoặc mật khẩu')
+    if (!isFirebaseConfigured) {
+      setLoginError('Firebase chưa được cấu hình. Chỉ tài khoản demo có thể sử dụng.')
+      return
+    }
+    try {
+      const user = await firebaseLogin(loginEmailFromUsername(u), p)
+      const access = await loadUserAccess(user)
+      setRole(access.role)
+      setLinkedStudentId(access.studentId || null)
+      setDemoLoaded(false)
+      setStudents([])
+      setTransactions([])
+      setLessons({})
+      setAuditLogs([])
+      setLockedWeeks({})
+      setGroups(DEFAULT_GROUPS)
+      setCloudSync(true)
+      setSyncStatus('live')
+      setLoggedIn(true)
+      localStorage.removeItem(STORAGE_KEY)
+    } catch (error: unknown) {
+      console.warn('[QLCN] login failed', error)
+      await firebaseLogout().catch(console.warn)
+      setCloudSync(false)
+      setSyncStatus('error')
+      const message = error instanceof Error && !error.message.includes('Firebase:')
+        ? error.message
+        : 'Sai tài khoản hoặc mật khẩu'
+      setLoginError(message)
+    }
+  }
+
+  const handleLogout = async () => {
+    if (cloudSync) await firebaseLogout().catch(console.warn)
+    setCloudSync(false)
+    setSyncStatus('off')
+    setLoggedIn(false)
+    setLinkedStudentId(null)
+    setDemoLoaded(false)
+    localStorage.removeItem(STORAGE_KEY)
   }
 
   if (!loggedIn) {
@@ -481,9 +551,8 @@ export default function App() {
           </form>
           <button type="button" onClick={loadDemo} className="w-full bg-teal-600 text-white py-2.5 rounded-xl text-sm font-medium mb-2">Demo + dữ liệu mẫu</button>
           <p className="text-xs text-gray-400 text-center leading-relaxed">
-            GVCN: quanlyhocsinh<br />
-            PH từng HS: SĐT (vd 0901234567)<br />
-            PH cả lớp: phuhuynh
+            Tài khoản được xác thực và phân quyền bởi Firebase.<br />
+            Phụ huynh có thể đăng nhập bằng SĐT đã được cấp tài khoản.
           </p>
         </div>
         {toast && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-emerald-800 text-white px-5 py-2.5 rounded-full text-sm">{toast}</div>}
@@ -510,7 +579,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full"><Shield className="w-3 h-3 inline" /> {ROLE_LABELS[role]}</span>
-            <button onClick={() => { setLoggedIn(false); setLinkedStudentId(null); localStorage.removeItem(STORAGE_KEY) }} className="p-2 text-red-500"><LogOut className="w-5 h-5" /></button>
+            <button onClick={() => void handleLogout()} className="p-2 text-red-500"><LogOut className="w-5 h-5" /></button>
           </div>
         </div>
       </header>
@@ -684,16 +753,11 @@ export default function App() {
                                 const val = e.target.value
                                 setLessons(prev => {
                                   const next = { ...prev, [k]: val }
-                                  try {
-                                    const raw = localStorage.getItem(STORAGE_KEY)
-                                    const base = raw ? JSON.parse(raw) : {}
-                                    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...base, lessons: next }))
-                                  } catch {}
                                   return next
                                 })
-                                if (isFirebaseConfigured) upsertDoc('assignments', k, { id: k, week, day: i, period: p, content: val }).catch(console.warn)
+                                if (cloudSync) upsertDoc('assignments', k, { id: k, week, day: i, period: p, content: val }).catch(() => showToast('Không thể đồng bộ báo bài'))
                               }}
-                              disabled={role === 'parent'}
+                              disabled={!canEditAssignments(role)}
                             />
                           </td>
                         ))}
@@ -711,14 +775,17 @@ export default function App() {
                 <h2 className="text-2xl font-bold text-emerald-900">Học sinh / PH</h2>
                 {canEditStudents(role) && (
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => {
+                    <button type="button" onClick={async () => {
                       const name = prompt('Họ và tên học sinh mới:')
                       if (!name?.trim()) return
                       const phone = prompt('SĐT phụ huynh:') || ''
                       const stt = students.filter(s => s.active).length + 1
                       const ns: Student = { id: uid(), stt, fullName: name.trim(), birthDate: '2017-01-01', gender: 'Nam', groupId: groups[0]?.id || 'g1', position: '', parentPhone: phone.trim(), parentCode: phone.trim(), notes: '', active: true }
+                      if (cloudSync) {
+                        try { await upsertDoc('students', ns.id, ns as unknown as Record<string, unknown>) }
+                        catch { showToast('Không thể thêm học sinh'); return }
+                      }
                       setStudents(prev => [...prev, ns])
-                      if (isFirebaseConfigured) upsertDoc('students', ns.id, ns as unknown as Record<string, unknown>).catch(console.warn)
                       showToast('Đã thêm HS')
                     }} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm">+ Thêm HS</button>
                     <button type="button" onClick={downloadCsvTemplate} className="border px-3 py-2 rounded-xl text-sm">Mẫu CSV</button>
@@ -802,7 +869,13 @@ export default function App() {
                 {([['schoolName', 'Trường'], ['className', 'Lớp'], ['homeroomTeacher', 'GVCN'], ['slogan', 'Khẩu hiệu']] as const).map(([k, l]) => (
                   <div key={k}><label className="text-sm">{l}</label><input className="w-full border rounded-lg px-3 py-2 text-sm" value={(classInfo as unknown as Record<string, string>)[k] || ''} onChange={e => setClassInfo(prev => ({ ...prev, [k]: e.target.value }))} /></div>
                 ))}
-                <button type="button" onClick={async () => { if (isFirebaseConfigured) await saveClassInfo(classInfo as unknown as Record<string, unknown>).catch(console.warn); showToast('Đã lưu') }} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Lưu</button>
+                <button type="button" onClick={async () => {
+                  if (cloudSync) {
+                    try { await saveClassInfo(classInfo as unknown as Record<string, unknown>) }
+                    catch { showToast('Không thể lưu cấu hình'); return }
+                  }
+                  showToast('Đã lưu')
+                }} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm">Lưu</button>
               </div>
             </div>
           )}

@@ -1,34 +1,26 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import {
   getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  createUserWithEmailAndPassword, type Auth, type User,
+  setPersistence, browserSessionPersistence, type Auth, type User,
 } from 'firebase/auth'
 import {
   getFirestore, doc, getDoc, setDoc, collection, onSnapshot,
-  query, addDoc, deleteDoc, serverTimestamp, runTransaction,
+  query, where, addDoc, deleteDoc, serverTimestamp, runTransaction,
   type Firestore, type Unsubscribe,
 } from 'firebase/firestore'
 
-const HARDCODED = {
-  apiKey: 'AIzaSyBexBGMuOkms37gNikIaxe-UyzMo2iTgQU',
-  authDomain: 'quanlyhocsinh-48840.firebaseapp.com',
-  projectId: 'quanlyhocsinh-48840',
-  storageBucket: 'quanlyhocsinh-48840.firebasestorage.app',
-  messagingSenderId: '407261790730',
-  appId: '1:407261790730:web:31728a762f0b8bab0f55f3',
-}
-
 const cfg = {
-  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string | undefined) || HARDCODED.apiKey,
-  authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined) || HARDCODED.authDomain,
-  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined) || HARDCODED.projectId,
-  storageBucket: (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined) || HARDCODED.storageBucket,
-  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined) || HARDCODED.messagingSenderId,
-  appId: (import.meta.env.VITE_FIREBASE_APP_ID as string | undefined) || HARDCODED.appId,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
 }
 
 export const isFirebaseConfigured = Boolean(
-  cfg.apiKey && cfg.projectId && cfg.apiKey !== 'YOUR_API_KEY' && String(cfg.apiKey).length > 10
+  cfg.apiKey && cfg.authDomain && cfg.projectId && cfg.appId &&
+  cfg.apiKey !== 'YOUR_API_KEY' && String(cfg.apiKey).length > 10
 )
 
 if (typeof window !== 'undefined') {
@@ -54,12 +46,8 @@ export function isFirebaseAuthed(): boolean {
 
 export async function firebaseLogin(email: string, password: string): Promise<User> {
   if (!auth) throw new Error('Firebase chưa cấu hình')
+  await setPersistence(auth, browserSessionPersistence)
   return (await signInWithEmailAndPassword(auth, email, password)).user
-}
-
-export async function firebaseRegister(email: string, password: string): Promise<User> {
-  if (!auth) throw new Error('Firebase chưa cấu hình')
-  return (await createUserWithEmailAndPassword(auth, email, password)).user
 }
 
 export async function firebaseLogout(): Promise<void> {
@@ -82,6 +70,29 @@ export async function loadClassInfo(): Promise<Record<string, unknown> | null> {
   return snap.exists() ? (snap.data() as Record<string, unknown>) : null
 }
 
+export interface UserAccess {
+  role: 'teacher' | 'classPresident' | 'viceStudy' | 'viceDiscipline' | 'parent' | 'viewer'
+  studentId?: string
+  active?: boolean
+  displayName?: string
+}
+
+export async function loadUserAccess(user: User): Promise<UserAccess> {
+  if (user.email?.toLowerCase() === 'quanlyhocsinh@qlcn.app') {
+    return { role: 'teacher', active: true, displayName: 'GVCN' }
+  }
+  if (!db) throw new Error('Firebase chưa cấu hình')
+  const snap = await getDoc(doc(db, 'users', user.uid))
+  if (!snap.exists()) throw new Error('Tài khoản chưa được cấp quyền')
+  const profile = snap.data() as UserAccess
+  if (profile.active === false) throw new Error('Tài khoản đã bị khóa')
+  if (!profile.role) throw new Error('Hồ sơ tài khoản thiếu vai trò')
+  if (profile.role === 'parent' && !profile.studentId) {
+    throw new Error('Tài khoản phụ huynh chưa liên kết học sinh')
+  }
+  return profile
+}
+
 export function watchCollection<T>(
   col: string,
   cb: (items: (T & { id: string })[]) => void,
@@ -97,6 +108,34 @@ export function watchCollection<T>(
     (err) => {
       console.warn('[QLCN] watch', col, err.message)
     },
+  )
+}
+
+export function watchCollectionWhere<T>(
+  col: string,
+  field: string,
+  value: string | number | boolean,
+  cb: (items: (T & { id: string })[]) => void,
+): Unsubscribe {
+  if (!db) { cb([]); return () => {} }
+  const q = query(collection(db, col), where(field, '==', value))
+  return onSnapshot(
+    q,
+    (snap) => cb(snap.docs.map(d => ({ id: d.id, ...(d.data() as T) }))),
+    (err) => console.warn('[QLCN] watch filtered', col, err.message),
+  )
+}
+
+export function watchDocument<T>(
+  col: string,
+  id: string,
+  cb: (item: (T & { id: string }) | null) => void,
+): Unsubscribe {
+  if (!db) { cb(null); return () => {} }
+  return onSnapshot(
+    doc(db, col, id),
+    (snap) => cb(snap.exists() ? ({ id: snap.id, ...(snap.data() as T) }) : null),
+    (err) => console.warn('[QLCN] watch document', col, err.message),
   )
 }
 
@@ -123,6 +162,7 @@ export async function createScoreTransactionAtomic(tx: {
   weekNumber: number
   date: string
   ruleId: string
+  category: string
   points: number
   note: string
   createdBy: string
@@ -146,12 +186,8 @@ export async function createScoreTransactionAtomic(tx: {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     if (msg.includes('đã khóa')) throw e
-    console.warn('[QLCN] atomic fail, fallback setDoc', msg)
-    await setDoc(txRef, {
-      ...tx,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true })
+    console.warn('[QLCN] atomic transaction failed', msg)
+    throw e
   }
 }
 

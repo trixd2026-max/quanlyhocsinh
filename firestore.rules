@@ -1,9 +1,151 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Ứng dụng lớp học nội bộ – đồng bộ realtime
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isTeacher() {
+      return signedIn() &&
+        request.auth.token.email == 'quanlyhocsinh@qlcn.app';
+    }
+
+    function hasProfile() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function role() {
+      return isTeacher()
+        ? 'teacher'
+        : get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function activeUser() {
+      return isTeacher() ||
+        (hasProfile() &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active != false);
+    }
+
+    function canReadAllStudents() {
+      return activeUser() &&
+        role() in ['teacher', 'classPresident', 'viceStudy', 'viceDiscipline', 'viewer'];
+    }
+
+    function linkedStudentId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId;
+    }
+
+    function isUnlocked(weekNumber) {
+      return !exists(/databases/$(database)/documents/weeklyLocks/week_$(weekNumber)) ||
+        get(/databases/$(database)/documents/weeklyLocks/week_$(weekNumber)).data.locked != true;
+    }
+
+    function canCreateCategory(category) {
+      return activeUser() && (
+        role() in ['teacher', 'classPresident'] ||
+        (role() == 'viceStudy' && category in ['study', 'bonus']) ||
+        (role() == 'viceDiscipline' && category in ['conduct', 'attendance'])
+      );
+    }
+
+    function validScoreRule(data) {
+      return
+        (data.ruleId == 'r1' && data.category == 'attendance' && data.points == 10) ||
+        (data.ruleId == 'r2' && data.category == 'bonus' && data.points == 2) ||
+        (data.ruleId == 'r3' && data.category == 'bonus' && data.points == 3) ||
+        (data.ruleId == 'r4' && data.category == 'bonus' && data.points == 2) ||
+        (data.ruleId == 'r5' && data.category == 'bonus' && data.points == 5) ||
+        (data.ruleId == 'r6' && data.category == 'attendance' && data.points == -5) ||
+        (data.ruleId == 'r7' && data.category == 'attendance' && data.points == -10) ||
+        (data.ruleId == 'r8' && data.category == 'conduct' && data.points == -3) ||
+        (data.ruleId == 'r9' && data.category == 'conduct' && data.points == -5) ||
+        (data.ruleId == 'r10' && data.category == 'conduct' && data.points == -3) ||
+        (data.ruleId == 'r11' && data.category == 'study' && data.points == -3) ||
+        (data.ruleId == 'r12' && data.category == 'study' && data.points == -2);
+    }
+
+    function validTransaction(data) {
+      return data.studentId is string &&
+        data.weekNumber is int &&
+        data.date is string &&
+        data.ruleId is string &&
+        data.category is string &&
+        data.points is number &&
+        data.note is string &&
+        data.createdBy is string &&
+        validScoreRule(data);
+    }
+
+    match /users/{userId} {
+      allow read: if activeUser() && (isTeacher() || request.auth.uid == userId);
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /classes/{classId} {
+      allow read: if activeUser();
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /groups/{groupId} {
+      allow read: if activeUser();
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /students/{studentId} {
+      allow read: if canReadAllStudents() ||
+        (activeUser() && role() == 'parent' && linkedStudentId() == studentId);
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /scoreTransactions/{transactionId} {
+      allow read: if canReadAllStudents() ||
+        (activeUser() && role() == 'parent' &&
+          resource.data.studentId == linkedStudentId());
+
+      allow create: if validTransaction(request.resource.data) &&
+        canCreateCategory(request.resource.data.category) &&
+        isUnlocked(request.resource.data.weekNumber);
+
+      allow update: if activeUser() &&
+        role() in ['teacher', 'classPresident'] &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['ruleId', 'category', 'points', 'note', 'updatedAt']) &&
+        request.resource.data.studentId == resource.data.studentId &&
+        request.resource.data.weekNumber == resource.data.weekNumber &&
+        validTransaction(request.resource.data) &&
+        canCreateCategory(request.resource.data.category) &&
+        isUnlocked(resource.data.weekNumber);
+
+      allow delete: if activeUser() &&
+        role() in ['teacher', 'classPresident'] &&
+        isUnlocked(resource.data.weekNumber);
+    }
+
+    match /weeklyLocks/{lockId} {
+      allow read: if activeUser();
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if activeUser();
+      allow create, update, delete: if activeUser() &&
+        role() in ['teacher', 'classPresident', 'viceStudy', 'viceDiscipline'];
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isTeacher();
+      allow create: if activeUser() &&
+        role() in ['teacher', 'classPresident', 'viceStudy', 'viceDiscipline'] &&
+        request.resource.data.role == role() &&
+        request.resource.data.action is string &&
+        request.resource.data.detail is string &&
+        request.resource.data.by is string;
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
