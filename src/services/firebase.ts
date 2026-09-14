@@ -170,7 +170,7 @@ export async function createScoreTransactionAtomic(tx: {
 }): Promise<void> {
   if (!db) return
   const txRef = doc(db, 'scoreTransactions', tx.id)
-  const lockRef = doc(db, 'weeklyLocks', `week_${tx.weekNumber}`)
+  const lockRef = doc(db, 'weeklyLocks', String(tx.weekNumber))
   try {
     await runTransaction(db, async (transaction) => {
       const lockSnap = await transaction.get(lockRef)
@@ -193,7 +193,7 @@ export async function createScoreTransactionAtomic(tx: {
 
 export async function setWeekLocked(weekNumber: number, locked: boolean, by: string): Promise<void> {
   if (!db) return
-  await setDoc(doc(db, 'weeklyLocks', `week_${weekNumber}`), {
+  await setDoc(doc(db, 'weeklyLocks', String(weekNumber)), {
     weekNumber, locked, by, updatedAt: serverTimestamp(),
   }, { merge: true })
 }

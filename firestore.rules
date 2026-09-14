@@ -37,8 +37,8 @@ service cloud.firestore {
     }
 
     function isUnlocked(weekNumber) {
-      return !exists(/databases/$(database)/documents/weeklyLocks/week_$(weekNumber)) ||
-        get(/databases/$(database)/documents/weeklyLocks/week_$(weekNumber)).data.locked != true;
+      return !exists(/databases/$(database)/documents/weeklyLocks/$(weekNumber)) ||
+        get(/databases/$(database)/documents/weeklyLocks/$(weekNumber)).data.locked != true;
     }
 
     function canCreateCategory(category) {
